@@ -23,21 +23,83 @@
 
 int EchoAssignment::serverMain(const char *bind_ip, int port,
                                const char *server_hello) {
-  // Your server code
-  // !IMPORTANT: do not use global variables and do not define/use functions
-  // !IMPORTANT: for all system calls, when an error happens, your program must
-  // return. e.g., if an read() call return -1, return -1 for serverMain.
 
+  int server_sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (server_sfd == -1) return -1;
+
+  struct sockaddr_in server_addr = {};
+  /*
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = inet_addr(bind_ip);
+  server_addr.sin_port = htons(port);
+  */
+
+  if (bind(server_sfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
+      return -1;
+  if (listen(server_sfd, 5) == -1) //왜 5?
+      return -1;
+
+  while (true) {
+      struct sockaddr_in client_addr;
+      socklen_t client_len = sizeof(client_addr);
+      int client_sfd = accept(server_sfd, (struct sockaddr*)&client_addr, &client_len);
+      if (client_sfd == -1) return -1;
+
+      char buffer[1024] = {};
+      ssize_t read_bytes = read(client_sfd, buffer, sizeof(buffer) - 1);
+      if (read_bytes <= 0) {
+          close(client_sfd);
+          return -1;
+      }
+      buffer[read_bytes] = '\0';
+
+      char response[1024];
+      if (strcmp(buffer, "hello\n") == 0) {
+          snprintf(response, sizeof(response), "%s\n", server_hello);
+      } else if (strcmp(buffer, "whoami\n") == 0) {
+          inet_ntop(AF_INET, &client_addr.sin_addr, response, sizeof(response));
+          strcat(response, "\n");
+      } else if (strcmp(buffer, "whoru\n") == 0) {
+          inet_ntop(AF_INET, &server_addr.sin_addr, response, sizeof(response));
+          strcat(response, "\n");
+      } else {
+          snprintf(response, sizeof(response), "%s", buffer);
+      }
+
+      write(client_sfd, response, strlen(response));
+      close(client_sfd);
+  }
+
+  close(server_sfd);
   return 0;
 }
 
 int EchoAssignment::clientMain(const char *server_ip, int port,
                                const char *command) {
-  // Your client code
-  // !IMPORTANT: do not use global variables and do not define/use functions
-  // !IMPORTANT: for all system calls, when an error happens, your program must
-  // return. e.g., if an read() call return -1, return -1 for clientMain.
+                                
+  int client_sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (client_sfd == -1) return -1;
 
+  struct sockaddr_in server_addr = {};
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = inet_addr(server_ip);
+  server_addr.sin_port = htons(port);
+
+  if (connect(client_sfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
+      return -1;
+
+  write(client_sfd, command, strlen(command));
+  
+  char buffer[1024] = {};
+  ssize_t read_bytes = read(client_sfd, buffer, sizeof(buffer) - 1);
+  if (read_bytes <= 0) {
+      close(client_sfd);
+      return -1;
+  }
+  buffer[read_bytes] = '\0';
+  
+  printf("Server response: %s", buffer);
+  close(client_sfd);
   return 0;
 }
 
