@@ -21,85 +21,85 @@
 // See below for their usage.
 // https://github.com/ANLAB-KAIST/KENSv3/wiki/Misc:-External-Resources#linux-manuals
 
-int EchoAssignment::serverMain(const char *bind_ip, int port,
-                               const char *server_hello) {
-
-  int server_sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (server_sfd == -1) return -1;
+int EchoAssignment::serverMain(const char *bind_ip, int port, const char *server_hello) {
+  int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (server_fd == -1) return -1;
 
   struct sockaddr_in server_addr = {};
-  /*
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = inet_addr(bind_ip);
   server_addr.sin_port = htons(port);
-  */
 
-  if (bind(server_sfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
+  if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
       return -1;
-  if (listen(server_sfd, 5) == -1) //왜 5?
+  if (listen(server_fd, 5) == -1)
       return -1;
 
   while (true) {
       struct sockaddr_in client_addr;
       socklen_t client_len = sizeof(client_addr);
-      int client_sfd = accept(server_sfd, (struct sockaddr*)&client_addr, &client_len);
-      if (client_sfd == -1) return -1;
+      int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+      if (client_fd == -1) return -1;
 
       char buffer[1024] = {};
-      ssize_t read_bytes = read(client_sfd, buffer, sizeof(buffer) - 1);
+      ssize_t read_bytes = read(client_fd, buffer, sizeof(buffer) - 1);
       if (read_bytes <= 0) {
-          close(client_sfd);
-          return -1;
+          close(client_fd);
+          continue;
       }
-      buffer[read_bytes] = '\0';
+      buffer[read_bytes-1] = '\0';
 
-      char response[1024];
-      if (strcmp(buffer, "hello\n") == 0) {
+      char client_ip[INET_ADDRSTRLEN] = {};
+      inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+      submitAnswer(client_ip, buffer); // 요청 로그 저장
+
+      char response[1024] = {};
+      if (strcmp(buffer, "hello") == 0) {
           snprintf(response, sizeof(response), "%s\n", server_hello);
-      } else if (strcmp(buffer, "whoami\n") == 0) {
-          inet_ntop(AF_INET, &client_addr.sin_addr, response, sizeof(response));
-          strcat(response, "\n");
-      } else if (strcmp(buffer, "whoru\n") == 0) {
-          inet_ntop(AF_INET, &server_addr.sin_addr, response, sizeof(response));
-          strcat(response, "\n");
+      } else if (strcmp(buffer, "whoami") == 0) {
+          snprintf(response, sizeof(response), "%s\n", client_ip);
+      } else if (strcmp(buffer, "whoru") == 0) {
+          snprintf(response, sizeof(response), "%s\n", bind_ip);
       } else {
-          snprintf(response, sizeof(response), "%s", buffer);
+          snprintf(response, sizeof(response), "%s\n", buffer);
       }
 
-      write(client_sfd, response, strlen(response));
-      close(client_sfd);
+      printf("[SERVER] Sending: %s", response);
+      write(client_fd, response, strlen(response));
   }
 
-  close(server_sfd);
+  close(server_fd);
   return 0;
 }
 
-int EchoAssignment::clientMain(const char *server_ip, int port,
-                               const char *command) {
-                                
-  int client_sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (client_sfd == -1) return -1;
+int EchoAssignment::clientMain(const char *server_ip, int port, const char *command) {
+  int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (client_fd == -1) return -1;
 
   struct sockaddr_in server_addr = {};
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = inet_addr(server_ip);
   server_addr.sin_port = htons(port);
 
-  if (connect(client_sfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
+  if (connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1)
       return -1;
 
-  write(client_sfd, command, strlen(command));
+  char ncommand[1024] = {};
+  snprintf(ncommand, sizeof(ncommand), "%s\n", command);
+  write(client_fd, ncommand, strlen(ncommand));
   
   char buffer[1024] = {};
-  ssize_t read_bytes = read(client_sfd, buffer, sizeof(buffer) - 1);
+  ssize_t read_bytes = read(client_fd, buffer, sizeof(buffer) - 1);
   if (read_bytes <= 0) {
-      close(client_sfd);
+      close(client_fd);
       return -1;
   }
-  buffer[read_bytes] = '\0';
+  buffer[read_bytes-1] = '\0';
+
+  submitAnswer(server_ip, buffer);
   
-  printf("Server response: %s", buffer);
-  close(client_sfd);
+  printf("[CLIENT] Server response: %s", buffer);
+  close(client_fd);
   return 0;
 }
 
