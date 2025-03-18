@@ -59,12 +59,20 @@ int EchoAssignment::serverMain(const char *bind_ip, int port, const char *server
       } else if (strcmp(buffer, "whoami") == 0) {
           snprintf(response, sizeof(response), "%s\n", client_ip);
       } else if (strcmp(buffer, "whoru") == 0) {
-          snprintf(response, sizeof(response), "%s\n", bind_ip);
+
+          struct sockaddr_in server_addr1;
+          socklen_t addr_len = sizeof(server_addr1);
+          char response1[1024] = {};
+          
+          getsockname(client_fd, (struct sockaddr*)&server_addr1, &addr_len);
+          inet_ntop(AF_INET, &server_addr1.sin_addr, response1, sizeof(response1));
+          
+          snprintf(response, sizeof(response), "%s\n", response1);
+          
       } else {
           snprintf(response, sizeof(response), "%s\n", buffer);
       }
 
-      printf("[SERVER] Sending: %s", response);
       write(client_fd, response, strlen(response));
   }
 
@@ -98,7 +106,6 @@ int EchoAssignment::clientMain(const char *server_ip, int port, const char *comm
 
   submitAnswer(server_ip, buffer);
   
-  printf("[CLIENT] Server response: %s", buffer);
   close(client_fd);
   return 0;
 }
