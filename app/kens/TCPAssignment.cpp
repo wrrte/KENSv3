@@ -178,6 +178,7 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
+  bind_table.erase({pid, fd});
   this->removeFileDescriptor(pid, fd);
   this->returnSystemCall(syscallUUID, 0);
 }
