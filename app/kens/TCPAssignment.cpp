@@ -22,7 +22,12 @@ TCPAssignment::TCPAssignment(Host &host)
 
 TCPAssignment::~TCPAssignment() {}
 
-void TCPAssignment::initialize() {TCP_state = CLOSE_state;}
+void TCPAssignment::initialize() {
+  TCP_state = CLOSE_state;
+  seq = 0;
+  bind_table.clear();
+  connection_table.clear(); 
+}
 
 void TCPAssignment::finalize() {}
 
@@ -142,14 +147,34 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  Packet SYN(100);
-  uint16_t data = 0b0100; //syn
+  if (!addr || addrlen < sizeof(struct sockaddr_in)) {
+    this->returnSystemCall(syscallUUID, -EINVAL);
+    return;
+  }
 
-  //SYN packet에 정보 추가
+  // 소켓이 존재하는지 확인
+  if (bind_table.find({pid, sockfd}) == bind_table.end()) {
+      this->returnSystemCall(syscallUUID, -EBADF);
+      return;
+  }
 
-  SYN.writeData(46, &data, 2);
-  sendPacket("IPv4", SYN);
-  TCP_state = SYN_SENT_state;
+  struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+  uint32_t peer_ip = sock_addr->sin_addr.s_addr;
+  uint16_t peer_port = sock_addr->sin_port;
+
+  // 이미 연결 중이라면 에러 반환
+  if (connection_table.find({pid, sockfd}) != connection_table.end()) {
+      this->returnSystemCall(syscallUUID, -EALREADY);
+      return;
+  }
+
+  // 연결 테이블에 추가
+  connection_table[{pid, sockfd}] = {peer_ip, peer_port};
+
+  // 블로킹 소켓이면 즉시 연결 완료 처리 (실제 구현에서는 3-way handshake 필요)
+  this->returnSystemCall(syscallUUID, 0);
+  return;
+
 }
 
 void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {

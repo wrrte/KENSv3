@@ -41,6 +41,7 @@ private:
   uint64_t seq;
 
   std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
+  std::map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> connection_table;
 
 public:
   TCPAssignment(Host &host);
