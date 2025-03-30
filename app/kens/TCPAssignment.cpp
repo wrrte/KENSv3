@@ -19,6 +19,7 @@ std::unordered_map<int, std::unordered_map<int, int>> socket_table; // {pid -> {
 std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
 
 
+
 TCPAssignment::TCPAssignment(Host &host)
     : HostModule("TCP", host), RoutingInfoInterface(host),
       SystemCallInterface(AF_INET, IPPROTO_TCP, host),
@@ -33,6 +34,7 @@ void TCPAssignment::finalize() {}
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
                                    const SystemCallParameter &param) {
 
+  //TCP_state도 적절히 수정해야함                                  
   switch (param.syscallNumber) {
   case SOCKET:
     this->syscall_socket(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -52,10 +54,11 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     //                     std::get<int>(param.params[2]));
     break;
   case CONNECT:
-    // this->syscall_connect(
-    //     syscallUUID, pid, std::get<int>(param.params[0]),
-    //     static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-    //     (socklen_t)std::get<int>(param.params[2]));
+    this->syscall_connect(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        (socklen_t)std::get<int>(param.params[2]));
+      
     break;
   case LISTEN:
     // this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -143,10 +146,59 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   this->returnSystemCall(syscallUUID, 0);
 }
 
+void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
+  //syn packet 생성 후 서버로 전송
+}
+
+
 void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
-  // Remove below
-  (void)fromModule;
-  (void)packet;
+  
+  // 1. 패킷 파싱
+  uint32_t srcIP, destIP;
+  uint16_t srcPort, destPort, seqNum, ackNum, flags;
+  
+  packet.readData(14 + 12, &srcIP, 4);  // IPv4 헤더에서 출발지 IP 주소 읽기
+  packet.readData(14 + 16, &destIP, 4); // IPv4 헤더에서 목적지 IP 주소 읽기
+  packet.readData(34, &srcPort, 2);     // TCP 헤더에서 출발지 포트 읽기
+  packet.readData(36, &destPort, 2);    // TCP 헤더에서 목적지 포트 읽기
+  packet.readData(38, &seqNum, 4);      // TCP 헤더에서 시퀀스 번호 읽기
+  packet.readData(42, &ackNum, 4);      // TCP 헤더에서 ACK 번호 읽기
+  packet.readData(46, &flags, 2);       // TCP 헤더에서 플래그 읽기
+  
+  srcPort = ntohs(srcPort);
+  destPort = ntohs(destPort);
+  seqNum = ntohl(seqNum);
+  ackNum = ntohl(ackNum);
+  flags = ntohs(flags);
+  
+  bool syn = flags & 0b0100;
+  bool ack = flags & 0b0010;
+  bool fin = flags & 0b0001;
+  
+  // 3. TCP 상태 전이 처리
+  switch (TCP_state) {
+    case (CLOSE_state):
+
+    case (LISTEN_state):
+      if (syn){
+        Packet synack;
+        //synack packet 만들어서 전송
+        sendPacket(fromModule, synack);
+        TCP_state = SYN_RCVD_state;
+      }
+      break;
+    case (SYN_RCVD_state):
+    case (SYN_SENT_state):
+    case (ESTABLISHED_state): 
+    case (CLOSE_WAIT_state):
+    case (FIN_WAIT_1_state): 
+    case (CLOSING_state):
+    case (LAST_ACK_state):
+    case (FIN_WAIT_2_state):
+    case (TIME_WAIT_state):
+    default:
+      break;
+  }
 }
 
 void TCPAssignment::timerCallback(std::any payload) {

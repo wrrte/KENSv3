@@ -16,6 +16,18 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 
+#define CLOSE_state 0
+#define LISTEN_state 1
+#define SYN_RCVD_state 2
+#define SYN_SENT_state 3
+#define ESTABLISHED_state 4
+#define CLOSE_WAIT_state 5
+#define FIN_WAIT_1_state 6
+#define CLOSING_state 7
+#define LAST_ACK_state 8
+#define FIN_WAIT_2_state 9
+#define TIME_WAIT_state 10
+
 namespace E {
 
 class TCPAssignment : public HostModule,
@@ -24,6 +36,8 @@ class TCPAssignment : public HostModule,
                       public TimerModule {
 private:
   virtual void timerCallback(std::any payload) final;
+
+  int TCP_state;
 
 public:
   TCPAssignment(Host &host);
@@ -36,6 +50,7 @@ protected:
                               const SystemCallParameter &param) final;
   void syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol);
   void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
+  void syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
 };
 
