@@ -40,6 +40,8 @@ private:
   uint64_t TCP_state;
   uint64_t seq;
 
+  std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
+
 public:
   TCPAssignment(Host &host);
   virtual void initialize();
@@ -52,6 +54,7 @@ protected:
   void syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol);
   void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   void syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
+  void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
   void syscall_close(UUID syscallUUID, int pid, int fd);
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
 };

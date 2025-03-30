@@ -72,10 +72,10 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
         (socklen_t)std::get<int>(param.params[2]));
     break;
   case GETSOCKNAME:
-    // this->syscall_getsockname(
-    //     syscallUUID, pid, std::get<int>(param.params[0]),
-    //     static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-    //     static_cast<socklen_t *>(std::get<void *>(param.params[2])));
+    this->syscall_getsockname(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        static_cast<socklen_t *>(std::get<void *>(param.params[2])));
     break;
   case GETPEERNAME:
     // this->syscall_getpeername(
@@ -94,7 +94,51 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
 }
 
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  
+    if (!addr || addrlen < sizeof(struct sockaddr_in)) {
+      this->returnSystemCall(syscallUUID, EINVAL);
+      return;
+  }
+
+  struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+
+  // AF_INET만 허용
+  if (sock_addr->sin_family != AF_INET) {
+      this->returnSystemCall(syscallUUID, EAFNOSUPPORT);
+      return;
+  }
+
+  uint32_t ip_addr = sock_addr->sin_addr.s_addr;
+  uint16_t port = sock_addr->sin_port;
+
+  auto IPnPort = bind_table.find({pid, sockfd});
+  if (IPnPort != bind_table.end()) {
+      uint32_t existing_ip = IPnPort->second.first;
+      uint16_t existing_port = IPnPort->second.second;
+
+      if (existing_ip == ip_addr && existing_port == port) {
+          this->returnSystemCall(syscallUUID, 0); // 이미 동일한 주소로 바인딩 → 성공
+          return;
+      } else {
+          this->returnSystemCall(syscallUUID, -EINVAL); // 다른 주소로 바인딩 시도 → 오류
+          return;
+      }
+  }
+
+  // 바인딩된 주소/포트 중복 확인
+  for (const auto &[key, value] : bind_table) {
+      uint32_t bound_ip = value.first;
+      uint16_t bound_port = value.second;
+
+      // 포트가 동일하고, IP가 동일하거나 INADDR_ANY(0.0.0.0)로 설정된 경우 충돌
+      if (bound_port == port && (bound_ip == ip_addr || bound_ip == INADDR_ANY || ip_addr == INADDR_ANY)) {
+          this->returnSystemCall(syscallUUID, EADDRINUSE);
+          return;
+      }
+  }
+
+  // 바인딩 정보 저장
+  bind_table[{pid, sockfd}] = {ip_addr, port};
+  this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
@@ -106,6 +150,31 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   SYN.writeData(46, &data, 2);
   sendPacket("IPv4", SYN);
   TCP_state = SYN_SENT_state;
+}
+
+void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
+  // fd가 바인딩되어 있는지 확인
+  auto it = bind_table.find({pid, sockfd});
+  if (it == bind_table.end()) {
+      this->returnSystemCall(syscallUUID, -EBADF); // 해당 소켓이 존재하지 않음
+      return;
+  }
+
+  // addrlen이 NULL이면 에러
+  if (!addrlen || !addr || *addrlen < sizeof(struct sockaddr_in)) {
+      this->returnSystemCall(syscallUUID, -EINVAL);
+      return;
+  }
+
+  struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+  sock_addr->sin_family = AF_INET;
+  sock_addr->sin_addr.s_addr = it->second.first;  // 저장된 IP 주소
+  sock_addr->sin_port = it->second.second;        // 저장된 포트 번호
+
+  // addrlen을 업데이트 (호출한 프로세스가 변경된 크기를 알도록)
+  *addrlen = sizeof(struct sockaddr_in);
+
+  this->returnSystemCall(syscallUUID, 0); // 성공
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
