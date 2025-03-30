@@ -37,7 +37,8 @@ class TCPAssignment : public HostModule,
 private:
   virtual void timerCallback(std::any payload) final;
 
-  int TCP_state;
+  uint64_t TCP_state;
+  uint64_t seq;
 
 public:
   TCPAssignment(Host &host);
@@ -51,6 +52,7 @@ protected:
   void syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol);
   void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   void syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
+  void syscall_close(UUID syscallUUID, int pid, int fd);
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
 };
 

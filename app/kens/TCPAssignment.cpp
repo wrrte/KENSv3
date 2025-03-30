@@ -15,11 +15,6 @@
 
 namespace E {
 
-std::unordered_map<int, std::unordered_map<int, int>> socket_table; // {pid -> {fd -> type}}
-std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
-
-
-
 TCPAssignment::TCPAssignment(Host &host)
     : HostModule("TCP", host), RoutingInfoInterface(host),
       SystemCallInterface(AF_INET, IPPROTO_TCP, host),
@@ -27,7 +22,7 @@ TCPAssignment::TCPAssignment(Host &host)
 
 TCPAssignment::~TCPAssignment() {}
 
-void TCPAssignment::initialize() {}
+void TCPAssignment::initialize() {TCP_state = CLOSE_state;}
 
 void TCPAssignment::finalize() {}
 
@@ -41,7 +36,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
                         std::get<int>(param.params[1]), std::get<int>(param.params[2]));
     break;
   case CLOSE:
-    // this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
+    this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
     break;
   case READ:
     // this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -94,62 +89,29 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
 }
 
 void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol) {
-  // 지원하는 도메인, 타입, 프로토콜인지 확인
-  if (domain != AF_INET || type != SOCK_STREAM || protocol != IPPROTO_TCP) {
-      this->returnSystemCall(syscallUUID, -EAFNOSUPPORT);
-      return;
-  }
-
-  // 새로운 파일 디스크립터 할당 (최소 fd = 3부터 시작)
-  int new_fd = 3;
-  while (socket_table[pid].count(new_fd)) {
-      new_fd++;
-  }
-
-  // 소켓 정보 저장
-  socket_table[pid][new_fd] = type;
-
-  // 성공적으로 생성된 fd 반환
-  this->returnSystemCall(syscallUUID, new_fd);
+  int fd = this->createFileDescriptor(pid);
+  this->returnSystemCall(syscallUUID, fd);
 }
 
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  if (!addr || addrlen < sizeof(struct sockaddr_in)) {
-      this->returnSystemCall(syscallUUID, -EINVAL);
-      return;
-  }
-
-  struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-
-  // AF_INET만 허용
-  if (sock_addr->sin_family != AF_INET) {
-      this->returnSystemCall(syscallUUID, -EAFNOSUPPORT);
-      return;
-  }
-
-  uint32_t ip_addr = sock_addr->sin_addr.s_addr;
-  uint16_t port = sock_addr->sin_port;
-
-  // 바인딩된 주소/포트 중복 확인
-  for (const auto &[key, value] : bind_table) {
-      uint32_t bound_ip = value.first;
-      uint16_t bound_port = value.second;
-
-      if (bound_port == port && (bound_ip == ip_addr || bound_ip == INADDR_ANY || ip_addr == INADDR_ANY)) {
-          this->returnSystemCall(syscallUUID, -EADDRINUSE);
-          return;
-      }
-  }
-
-  // 바인딩 정보 저장
-  bind_table[{pid, sockfd}] = {ip_addr, port};
-  this->returnSystemCall(syscallUUID, 0);
+  
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  //syn packet 생성 후 서버로 전송
+  Packet SYN(100);
+  uint16_t data = 0b0100; //syn
+
+  //SYN packet에 정보 추가
+
+  SYN.writeData(46, &data, 2);
+  sendPacket("IPv4", SYN);
+  TCP_state = SYN_SENT_state;
 }
 
+void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
+  this->removeFileDescriptor(pid, fd);
+  this->returnSystemCall(syscallUUID, 0);
+}
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
@@ -170,6 +132,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   seqNum = ntohl(seqNum);
   ackNum = ntohl(ackNum);
   flags = ntohs(flags);
+
+  //source dest 주소 바꾸고, ack 번호는 seq # +1로 세팅하고,seq 번호는 seq 변수에 1 더해서 ㄱㄱ
+  //flag는 밑에 switch에서 이미 함.
+
+  // Filling in all TCP header fields (e.g., source/destination ports, sequence and 
+  //  acknowledgment numbers, flags, window size, etc.)
+  // Appending the payload (user/application data)
+  // 연결한 소켓에다가 payload를 적으면 될 듯?
+  // Computing and setting the TCP checksum
+  // Passing the completed segment to the IP layer for transmission
   
   bool syn = flags & 0b0100;
   bool ack = flags & 0b0010;
@@ -181,21 +153,71 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     case (LISTEN_state):
       if (syn){
-        Packet synack;
-        //synack packet 만들어서 전송
-        sendPacket(fromModule, synack);
+        Packet SYNACK(100);
+        uint16_t data = 0b0110; //syn, ack
+        SYNACK.writeData(46, &data, 2);
+        sendPacket(fromModule, SYNACK);
         TCP_state = SYN_RCVD_state;
       }
       break;
     case (SYN_RCVD_state):
+      if (ack){
+        TCP_state = ESTABLISHED_state;
+      }
+      break;
     case (SYN_SENT_state):
-    case (ESTABLISHED_state): 
+      if (syn && ack){
+        Packet ACK(100);
+        uint16_t data = 0b0010; //ack
+        ACK.writeData(46, &data, 2);
+        sendPacket(fromModule, ACK);
+        TCP_state = SYN_RCVD_state;
+      }
+      break;
+    case (ESTABLISHED_state):
+      if (fin){
+        Packet FIN(100);
+        uint16_t data = 0b0001; //fin
+        FIN.writeData(46, &data, 2);
+        sendPacket(fromModule, FIN);
+        TCP_state = CLOSE_WAIT_state;
+      }
+      break;
     case (CLOSE_WAIT_state):
+      break;
     case (FIN_WAIT_1_state): 
+      if (fin){
+        Packet ACK(100);
+        uint16_t data = 0b0010; //ack
+        ACK.writeData(46, &data, 2);
+        if (ack) TCP_state = TIME_WAIT_state;
+        else TCP_state = CLOSING_state;
+      }
+      else if (ack){
+        TCP_state = FIN_WAIT_2_state;
+      }
+      break;
     case (CLOSING_state):
+      if (ack){
+        TCP_state = TIME_WAIT_state;
+      }
+      break;
     case (LAST_ACK_state):
+      if (ack){
+        TCP_state = CLOSE_state;
+      }
+      break;
     case (FIN_WAIT_2_state):
+      if (fin){
+        Packet ACK(100);
+        uint16_t data = 0b0010; //ack
+        ACK.writeData(46, &data, 2);
+        TCP_state = TIME_WAIT_state;
+      }
+      break;
     case (TIME_WAIT_state):
+      TCP_state = CLOSE_state;
+      break;
     default:
       break;
   }
