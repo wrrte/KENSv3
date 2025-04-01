@@ -63,6 +63,8 @@ protected:
 
     std::vector<int> client_sockets;
 
+    printf("accept_count : %d\n", accept_count);
+
     for (int k = 0; k < accept_count; k++) {
       struct sockaddr_in client_addr;
       socklen_t client_len = sizeof(client_addr);
@@ -84,6 +86,10 @@ protected:
         EXPECT_EQ(addr.sin_port, temp_addr.sin_port);
 
         client_sockets.push_back(client_fd);
+        printf("success accept ret val : %d\n", client_fd);
+      }
+      else{
+        printf("fail accept ret val : %d\n", client_fd);
       }
       usleep(accept_period);
     }
@@ -159,6 +165,9 @@ protected:
 
         client_sockets.push_back(client_socket);
         client_ports.push_back(temp_addr.sin_port);
+      }
+      else{
+        printf("%d %d\n", ret, client_socket);
       }
 
       usleep(connect_period);

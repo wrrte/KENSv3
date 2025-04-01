@@ -1,14 +1,16 @@
 {
     "version": "0.2.0",
     "configurations": [
+
+
         {
             "name": "Debug Echo",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/Users/choemj/KENSv3/build/app/echo/echo",
+            "program": "/Users/choemj/KENSv3/build/app/kens/test-kens-bind",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "/Users/choemj/KENSv3/build/app/echo",
+            "cwd": "/Users/choemj/KENSv3/build/app/kens",
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",

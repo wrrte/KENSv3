@@ -41,6 +41,8 @@ private:
   uint64_t seq;
 
   std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
+  std::unordered_map<std::pair<int, int>, int> listen_table;
+  std::unordered_map<std::pair<int, int>, std::queue<struct sockaddr_in>> accept_queue;
   std::map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> connection_table;
 
 public:
@@ -53,6 +55,8 @@ protected:
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
   void syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol);
+  void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog);
+  void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
   void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   void syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);

@@ -136,7 +136,10 @@ Module::Message Host::messageReceived(const ModuleID from,
                 "app[pid:%d] at [%s]",
                 syscall.param.syscallNumber, curSyscallID, syscall.pid,
                 this->getModuleName().c_str());
-      iface->systemCallback(curSyscallID, syscall.pid, syscall.param);
+      SystemCallInterface::SystemCallParameter paramCopy = syscall.param;
+      iface->systemCallback(curSyscallID, syscall.pid, paramCopy);
+      //iface->systemCallback(curSyscallID, syscall.pid, syscall.param);
+      //printf("syscallNumber : %d\n", syscall.param.syscallNumber);
     }
   } else if (typeid(message) == typeid(Timer &)) {
     Timer &timer = dynamic_cast<Timer &>(message);

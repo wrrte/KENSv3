@@ -31,10 +31,13 @@ void TCPAssignment::initialize() {
 
 void TCPAssignment::finalize() {}
 
+bool isNonBlocking(int sockfd){ return false; }
+
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
                                    const SystemCallParameter &param) {
 
-  //TCP_state도 적절히 수정해야함                                  
+  printf("syscallnum : %d\n", param.syscallNumber);
+                                 
   switch (param.syscallNumber) {
   case SOCKET:
     this->syscall_socket(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -54,21 +57,21 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     //                     std::get<int>(param.params[2]));
     break;
   case CONNECT:
+    assert(false);
     this->syscall_connect(
         syscallUUID, pid, std::get<int>(param.params[0]),
         static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
         (socklen_t)std::get<int>(param.params[2]));
-      
     break;
   case LISTEN:
-    // this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                      std::get<int>(param.params[1]));
+    this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
+                         std::get<int>(param.params[1]));
     break;
   case ACCEPT:
-    // this->syscall_accept(
-    //     syscallUUID, pid, std::get<int>(param.params[0]),
-    //     static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-    //     static_cast<socklen_t *>(std::get<void *>(param.params[2])));
+    this->syscall_accept(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        static_cast<socklen_t *>(std::get<void *>(param.params[2])));
     break;
   case BIND:
     this->syscall_bind(
@@ -94,14 +97,89 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
 }
 
 void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol) {
+  //assert(false);
   int fd = this->createFileDescriptor(pid);
   this->returnSystemCall(syscallUUID, fd);
 }
 
-void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-    if (!addr || addrlen < sizeof(struct sockaddr_in)) {
+void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) {
+  // 소켓이 바인딩되었는지 확인
+  auto it = bind_table.find({pid, sockfd});
+  if (it == bind_table.end()) {
+      this->returnSystemCall(syscallUUID, EINVAL); // 바인딩되지 않은 소켓
+      return;
+  }
+
+  // 이미 listen 상태인지 확인
+  if (listen_table.find({pid, sockfd}) != listen_table.end()) {
+      this->returnSystemCall(syscallUUID, 0); // 이미 listen 상태라면 성공
+      return;
+  }
+
+  if (backlog < 0) {
+    backlog = 0;
+  }
+
+  // 소켓을 listen 상태로 변경
+  listen_table[{pid, sockfd}] = backlog;
+  this->returnSystemCall(syscallUUID, 0);
+}
+
+void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {  
+
+  // 소켓이 listen 상태인지 확인
+  auto listen_it = listen_table.find({pid, sockfd});
+  if (listen_it == listen_table.end()) {
+      // listen 상태가 아닌 소켓은 오류
       this->returnSystemCall(syscallUUID, EINVAL);
       return;
+  }
+  
+  // 대기 큐에서 연결 요청을 가져옴
+  auto queue_it = accept_queue.find({pid, sockfd});
+  if (queue_it == accept_queue.end() || queue_it->second.empty()) {
+      // 대기 큐가 비어있고 O_NONBLOCK이 설정되지 않았다면 차단
+      if (isNonBlocking(sockfd)) {
+          this->returnSystemCall(syscallUUID, EAGAIN); // 비동기 모드에서 큐가 비어있다면 오류 반환
+      } else {
+          wait();
+      }
+      return;
+  }
+
+  // 대기 큐에서 첫 번째 연결 요청을 수락
+  struct sockaddr_in client_addr;
+  socklen_t client_addr_len = sizeof(client_addr);
+  struct sockaddr_in *client_addr_ptr = &client_addr;
+
+  if (addr && addrlen && *addrlen >= sizeof(struct sockaddr_in)) {
+      // 클라이언트 주소를 복사
+      memcpy(addr, client_addr_ptr, sizeof(struct sockaddr_in));
+      *addrlen = sizeof(struct sockaddr_in);
+  }
+
+  // 새로운 소켓 파일 디스크립터 할당
+  int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
+  if (new_sockfd < 0) {
+      this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
+      return;
+  }
+
+  // 새 소켓을 listen 상태로 설정
+  listen_table[{pid, new_sockfd}] = 0;
+
+  // 대기 큐에서 연결 요청 제거
+  queue_it->second.pop();
+
+  // 연결 성공 시 새 소켓 반환
+  this->returnSystemCall(syscallUUID, new_sockfd);
+}
+
+void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
+  
+  if (!addr || addrlen < sizeof(struct sockaddr_in)) {
+    this->returnSystemCall(syscallUUID, EINVAL);
+    return;
   }
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
@@ -147,34 +225,51 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  if (!addr || addrlen < sizeof(struct sockaddr_in)) {
-    this->returnSystemCall(syscallUUID, -EINVAL);
-    return;
-  }
-
-  // 소켓이 존재하는지 확인
-  if (bind_table.find({pid, sockfd}) == bind_table.end()) {
-      this->returnSystemCall(syscallUUID, -EBADF);
+  // 유효한 주소인지 확인
+  /*
+  if (!addr || addrlen < sizeof(struct sockaddr)) {
+      printf("asdf\n");
+      this->returnSystemCall(syscallUUID, -EINVAL);
       return;
   }
+      */
+  assert(false);
+  this->returnSystemCall(syscallUUID, 0);
+  return;
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   uint32_t peer_ip = sock_addr->sin_addr.s_addr;
   uint16_t peer_port = sock_addr->sin_port;
 
-  // 이미 연결 중이라면 에러 반환
-  if (connection_table.find({pid, sockfd}) != connection_table.end()) {
-      this->returnSystemCall(syscallUUID, -EALREADY);
+  if (bind_table.find({pid, sockfd}) == bind_table.end()) {
+      struct sockaddr_in auto_bind_addr;
+      auto_bind_addr.sin_family = AF_INET;
+      auto_bind_addr.sin_addr.s_addr = INADDR_ANY;  // 시스템에서 자동 할당
+      auto_bind_addr.sin_port = htons(rand() % (65535 - 1024) + 1024);  // 1024~65535 중 랜덤 포트
+
+      bind_table[{pid, sockfd}] = {auto_bind_addr.sin_addr.s_addr, auto_bind_addr.sin_port};
+  }
+
+  printf("\ntest1\n\n");
+
+  if (connection_table.find({pid, sockfd}) == connection_table.end()) {
+      // 연결 테이블에 추가
+      connection_table[{pid, sockfd}] = {peer_ip, peer_port};
+      this->returnSystemCall(syscallUUID, 0);
       return;
   }
 
-  // 연결 테이블에 추가
-  connection_table[{pid, sockfd}] = {peer_ip, peer_port};
+  Packet SYN(100);
+  uint16_t data = 0b0100; //syn
+
+  //SYN packet에 정보 추가
+
+  SYN.writeData(46, &data, 2);
+  sendPacket("IPv4", SYN);
+  TCP_state = SYN_SENT_state;
 
   // 블로킹 소켓이면 즉시 연결 완료 처리 (실제 구현에서는 3-way handshake 필요)
   this->returnSystemCall(syscallUUID, 0);
-  return;
-
 }
 
 void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
