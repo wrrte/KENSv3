@@ -125,56 +125,6 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
   this->returnSystemCall(syscallUUID, 0);
 }
 
-void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {  
-
-  // 소켓이 listen 상태인지 확인
-  auto listen_it = listen_table.find({pid, sockfd});
-  if (listen_it == listen_table.end()) {
-      // listen 상태가 아닌 소켓은 오류
-      this->returnSystemCall(syscallUUID, EINVAL);
-      return;
-  }
-  
-  // 대기 큐에서 연결 요청을 가져옴
-  auto queue_it = accept_queue.find({pid, sockfd});
-  if (queue_it == accept_queue.end() || queue_it->second.empty()) {
-      // 대기 큐가 비어있고 O_NONBLOCK이 설정되지 않았다면 차단
-      if (isNonBlocking(sockfd)) {
-          this->returnSystemCall(syscallUUID, EAGAIN); // 비동기 모드에서 큐가 비어있다면 오류 반환
-      } else {
-          wait();
-      }
-      return;
-  }
-
-  // 대기 큐에서 첫 번째 연결 요청을 수락
-  struct sockaddr_in client_addr;
-  socklen_t client_addr_len = sizeof(client_addr);
-  struct sockaddr_in *client_addr_ptr = &client_addr;
-
-  if (addr && addrlen && *addrlen >= sizeof(struct sockaddr_in)) {
-      // 클라이언트 주소를 복사
-      memcpy(addr, client_addr_ptr, sizeof(struct sockaddr_in));
-      *addrlen = sizeof(struct sockaddr_in);
-  }
-
-  // 새로운 소켓 파일 디스크립터 할당
-  int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
-  if (new_sockfd < 0) {
-      this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
-      return;
-  }
-
-  // 새 소켓을 listen 상태로 설정
-  listen_table[{pid, new_sockfd}] = 0;
-
-  // 대기 큐에서 연결 요청 제거
-  queue_it->second.pop();
-
-  // 연결 성공 시 새 소켓 반환
-  this->returnSystemCall(syscallUUID, new_sockfd);
-}
-
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
   
   if (!addr || addrlen < sizeof(struct sockaddr_in)) {
@@ -224,18 +174,92 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   this->returnSystemCall(syscallUUID, 0);
 }
 
-void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  // 유효한 주소인지 확인
+void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {  
+
   /*
-  if (!addr || addrlen < sizeof(struct sockaddr)) {
-      printf("asdf\n");
-      this->returnSystemCall(syscallUUID, -EINVAL);
+  주소가 널 포인터가 아닌 경우, 수락된 연결에 대한 피어의 주소는 주소가 가리키는 sockaddr 구조체에 저장되며, 
+  이 주소의 길이는 address_len이 가리키는 객체에 저장됩니다.
+
+  주소의 실제 길이가 제공된 sockaddr 구조체의 길이보다 크면, 저장된 주소는 잘립니다.
+
+  프로토콜이 바인딩되지 않은 클라이언트의 연결을 허용하고 피어가 바인딩되지 않은 경우, 
+  주소가 가리키는 객체에 저장된 값은 지정되지 않은 값입니다.
+
+  수신 대기열에 연결 요청이 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되지 않은 경우, 
+  연결이 있을 때까지 accept()가 차단됩니다. 
+  listen() 큐에 연결 요청이 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되어 있으면 
+  accept()는 실패하고 errno를 [EAGAIN] 또는 [EWOULDDBLOCK]으로 설정합니다.
+
+  수락된 소켓은 자체적으로 더 많은 연결을 수락할 수 없습니다. 
+  원래 소켓은 열린 상태로 유지되며 더 많은 연결을 수락할 수 있습니다.
+  */
+
+  
+  // 소켓이 listen 상태인지 확인
+  auto listen_it = listen_table.find({pid, sockfd});
+  if (listen_it == listen_table.end()) {
+      // listen 상태가 아닌 소켓은 오류
+      this->returnSystemCall(syscallUUID, EINVAL);
       return;
   }
-      */
-  assert(false);
-  this->returnSystemCall(syscallUUID, 0);
-  return;
+  
+  // 대기 큐에서 연결 요청을 가져옴
+  auto queue_it = accept_queue.find({pid, sockfd});
+  if (queue_it == accept_queue.end() || queue_it->second.empty()) {
+      // 대기 큐가 비어있고 O_NONBLOCK이 설정되지 않았다면 차단
+      if (isNonBlocking(sockfd)) {
+        this->returnSystemCall(syscallUUID, EAGAIN); // 비동기 모드에서 큐가 비어있다면 오류 반환
+      } else {
+        //syscallUUID를 적당한 곳에 저장해두고, packetarrived 함수에서 syn 받았을 때 저장된 syscallUUID를 꺼내서 사용하도록 하기
+      }
+      return;
+  }
+
+  // 대기 큐에서 첫 번째 연결 요청을 수락
+  struct sockaddr_in client_addr;
+  socklen_t client_addr_len = sizeof(client_addr);
+  struct sockaddr_in *client_addr_ptr = &client_addr;
+
+  if (addr && addrlen && *addrlen >= sizeof(struct sockaddr_in)) {
+      // 클라이언트 주소를 복사
+      memcpy(addr, client_addr_ptr, sizeof(struct sockaddr_in));
+      *addrlen = sizeof(struct sockaddr_in);
+  }
+
+  // 새로운 소켓 파일 디스크립터 할당
+  int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
+  if (new_sockfd < 0) {
+      this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
+      return;
+  }
+
+  // 새 소켓을 listen 상태로 설정
+  listen_table[{pid, new_sockfd}] = 0;
+
+  // 대기 큐에서 연결 요청 제거
+  queue_it->second.pop();
+
+  // 연결 성공 시 새 소켓 반환
+  this->returnSystemCall(syscallUUID, new_sockfd);
+}
+
+void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
+
+  /*
+  소켓이 아직 로컬 주소에 바인딩되지 않은 경우, 
+  connect()는 소켓의 주소 패밀리가 AF_UNIX가 아니라면 사용하지 않는 로컬 주소인 주소에 소켓을 바인딩합니다.
+
+  시작 소켓이 연결 모드가 아닌 경우 connect()는 소켓의 피어 주소를 설정하고 연결이 이루어지지 않습니다. 
+  SOCK_DGRAM 소켓의 경우, 
+  피어 주소는 후속 send() 함수에서 모든 데이터그램이 전송되는 위치를 식별하고 
+  후속 recv() 함수에 대한 원격 발신자를 제한합니다. 
+  주소가 프로토콜에 대한 널 주소인 경우, 소켓의 피어 주소는 재설정됩니다.
+  */
+
+  if (!addr || addrlen < sizeof(struct sockaddr)) {
+    this->returnSystemCall(syscallUUID, -EINVAL);
+    return;
+  }
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   uint32_t peer_ip = sock_addr->sin_addr.s_addr;
@@ -250,8 +274,6 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
       bind_table[{pid, sockfd}] = {auto_bind_addr.sin_addr.s_addr, auto_bind_addr.sin_port};
   }
 
-  printf("\ntest1\n\n");
-
   if (connection_table.find({pid, sockfd}) == connection_table.end()) {
       // 연결 테이블에 추가
       connection_table[{pid, sockfd}] = {peer_ip, peer_port};
@@ -259,16 +281,42 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
       return;
   }
 
+
+  /*
+  시작 소켓이 연결 모드인 경우 connect()는 주소 인자로 지정된 주소로 연결을 설정하려고 시도합니다. 
+  연결이 즉시 설정될 수 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되지 않은 경우, 
+  connect()는 연결이 설정될 때까지 지정되지 않은 시간 초과 간격까지 차단합니다. 
+  연결이 설정되기 전에 시간 초과 간격이 만료되면 connect()는 실패하고 연결 시도가 중단됩니다. 
+  연결 설정 대기 중 차단된 신호에 의해 connect()가 중단되면 connect()는 실패하고 
+  errno를 [EINTR]로 설정하지만 연결 요청은 중단되지 않으며 비동기적으로 연결이 설정됩니다.
+
+  연결을 즉시 설정할 수 없고 소켓의 파일 설명자에 O_NONBLOCK이 설정되어 있으면 
+  connect()가 실패하고 errno가 [EINPROGRESS]로 설정되지만 
+  연결 요청은 중단되지 않으며 비동기적으로 연결이 설정됩니다. 
+  연결이 설정되기 전에 동일한 소켓에 대한 후속 connect() 호출은 실패하고 errno가 [EALREADY]로 설정됩니다.
+
+  연결이 비동기적으로 설정되면 select() 및 poll()은 소켓의 파일 설명자를 쓸 준비가 되었음을 나타냅니다.
+
+  사용 중인 소켓은 프로세스에 connect() 함수를 사용하기 위한 적절한 권한이 필요할 수 있습니다.
+  */
+
+
+
   Packet SYN(100);
-  uint16_t data = 0b0100; //syn
+  uint16_t srcPort, destPort, seqNum, ackNum, flags;
+  flags = 0b0100; //syn
+  SYN.writeData(46, &flags, 2);
 
-  //SYN packet에 정보 추가
+  seqNum = 0;
+  SYN.writeData(38, &seqNum, 4);
 
-  SYN.writeData(46, &data, 2);
-  sendPacket("IPv4", SYN);
-  TCP_state = SYN_SENT_state;
+  sendPacket("IPv4", std::move(SYN));
 
-  // 블로킹 소켓이면 즉시 연결 완료 처리 (실제 구현에서는 3-way handshake 필요)
+  if(isNonBlocking(sockfd)){
+    this->returnSystemCall(syscallUUID, EINPROGRESS);
+    return;
+  }
+
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -305,38 +353,7 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
-  // 1. 패킷 파싱
-  uint32_t srcIP, destIP;
-  uint16_t srcPort, destPort, seqNum, ackNum, flags;
-  
-  packet.readData(14 + 12, &srcIP, 4);  // IPv4 헤더에서 출발지 IP 주소 읽기
-  packet.readData(14 + 16, &destIP, 4); // IPv4 헤더에서 목적지 IP 주소 읽기
-  packet.readData(34, &srcPort, 2);     // TCP 헤더에서 출발지 포트 읽기
-  packet.readData(36, &destPort, 2);    // TCP 헤더에서 목적지 포트 읽기
-  packet.readData(38, &seqNum, 4);      // TCP 헤더에서 시퀀스 번호 읽기
-  packet.readData(42, &ackNum, 4);      // TCP 헤더에서 ACK 번호 읽기
-  packet.readData(46, &flags, 2);       // TCP 헤더에서 플래그 읽기
-  
-  srcPort = ntohs(srcPort);
-  destPort = ntohs(destPort);
-  seqNum = ntohl(seqNum);
-  ackNum = ntohl(ackNum);
-  flags = ntohs(flags);
 
-  //source dest 주소 바꾸고, ack 번호는 seq # +1로 세팅하고,seq 번호는 seq 변수에 1 더해서 ㄱㄱ
-  //flag는 밑에 switch에서 이미 함.
-
-  // Filling in all TCP header fields (e.g., source/destination ports, sequence and 
-  //  acknowledgment numbers, flags, window size, etc.)
-  // Appending the payload (user/application data)
-  // 연결한 소켓에다가 payload를 적으면 될 듯?
-  // Computing and setting the TCP checksum
-  // Passing the completed segment to the IP layer for transmission
-  
-  bool syn = flags & 0b0100;
-  bool ack = flags & 0b0010;
-  bool fin = flags & 0b0001;
-  
   // 3. TCP 상태 전이 처리
   switch (TCP_state) {
     case (CLOSE_state):
@@ -357,6 +374,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       break;
     case (SYN_SENT_state):
       if (syn && ack){
+        received = true;
         Packet ACK(100);
         uint16_t data = 0b0010; //ack
         ACK.writeData(46, &data, 2);
