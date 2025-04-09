@@ -26,6 +26,7 @@ void TCPAssignment::initialize() {
   TCP_state = CLOSE_state;
   seq = 0;
   bind_table.clear();
+  connect_requests.clear();
 }
 
 void TCPAssignment::finalize() {}
@@ -120,6 +121,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 
   // 소켓을 listen 상태로 변경
   listen_table[{pid, sockfd}] = backlog;
+  TCP_state = LISTEN_state;
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -194,37 +196,32 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 
   //connect 큐 확인해서 있으면 그거 받고 할거 다 실행하고 리턴. 없으면 accept큐에 넣어두기.
 
-  if (connection_requests.empty()){
-    accept_requests.emplace_back(syscallUUID, &addr, &addrlen);
+  if (connect_requests.empty()){
+
+    auto listen_it = listen_table.find({pid, sockfd});
+    if (listen_it == listen_table.end()) {
+        // listen 상태가 아닌 소켓은 오류
+        this->returnSystemCall(syscallUUID, EINVAL);
+        return;
+    }
+
+    accept_requests.emplace_back(syscallUUID, pid, addr, addrlen);
     return;
   }
-  auto [fromModule, packet, flagsByte, srcport, destport, seqnum, acknum, srcip, destip] = connection_requests.front();
-  connection_requests.pop_front();
 
-  sendSYNACK(fromModule, std::move(packet), flagsByte, srcport, destport, seqnum, acknum, srcip, destip);
+  auto&& [fromModule, packet] = connect_requests.front();
+  connect_requests.pop_front();
 
+  sendSYNACK(fromModule, std::move(packet));
 
-  //밑에 syn 받았을 때 한 걸 똑같이 해야 할 듯. 그냥 함수로 만들어버릴까? 
-  //그리고 request list에 인자 이름을 똑같이 해서 편하게 만들기.
+  uint16_t srcport;
+  uint32_t srcip;
+  packet.readData(26, &srcip, 4);
+  packet.readData(34, &srcport, 2);
 
-  // 소켓이 listen 상태인지 확인
-  auto listen_it = listen_table.find({pid, sockfd});
-  if (listen_it == listen_table.end()) {
-      // listen 상태가 아닌 소켓은 오류
-      this->returnSystemCall(syscallUUID, EINVAL);
-      return;
-  }
-
-  // 대기 큐에서 첫 번째 연결 요청을 수락
-  struct sockaddr_in client_addr;
-  socklen_t client_addr_len = sizeof(client_addr);
-  struct sockaddr_in *client_addr_ptr = &client_addr;
-
-  if (addr && addrlen && *addrlen >= sizeof(struct sockaddr_in)) {
-      // 클라이언트 주소를 복사
-      memcpy(addr, client_addr_ptr, sizeof(struct sockaddr_in));
-      *addrlen = sizeof(struct sockaddr_in);
-  }
+  struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+  client_addr->sin_addr.s_addr = srcip; //번호가 묘하게 다르면 htons 써보기
+  client_addr->sin_port = srcport;
 
   // 새로운 소켓 파일 디스크립터 할당
   int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
@@ -235,18 +232,14 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 
   // 새 소켓을 listen 상태로 설정
   listen_table[{pid, new_sockfd}] = 0;
-  TCP_state = LISTEN_state;
 
-  if (isNonBlocking(sockfd)) {
-    this->returnSystemCall(syscallUUID, EAGAIN); // 비동기 모드에서 큐가 비어있다면 오류 반환
-  } else {
-    accept_requests.emplace_back(syscallUUID, new_sockfd); 
-  }
+  this->returnSystemCall(syscallUUID, new_sockfd);
+
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
   /*
-  /*
+  
   소켓이 아직 로컬 주소에 바인딩되지 않은 경우, 
   connect()는 소켓의 주소 패밀리가 AF_UNIX가 아니라면 사용하지 않는 로컬 주소인 주소에 소켓을 바인딩합니다.
 
@@ -285,7 +278,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
       return;
   }
 
-  /*
+  
   시작 소켓이 연결 모드인 경우 connect()는 주소 인자로 지정된 주소로 연결을 설정하려고 시도합니다. 
   연결이 즉시 설정될 수 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되지 않은 경우, 
   connect()는 연결이 설정될 때까지 지정되지 않은 시간 초과 간격까지 차단합니다. 
@@ -337,7 +330,22 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
   this->returnSystemCall(syscallUUID, 0); // 성공
 }
 
-void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet, uint8_t flagsByte, uint16_t srcport, uint16_t destport, uint16_t seqnum, uint16_t acknum, uint32_t srcip, uint32_t destip) {
+void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
+
+  uint8_t flagsByte;
+  uint16_t srcport, destport, seqnum, acknum;
+  uint32_t srcip, destip;
+
+  packet.readData(26, &srcip, 4);
+  packet.readData(30, &destip, 4);
+
+  packet.readData(34, &srcport, 2);
+  packet.readData(34+2, &destport, 2);
+
+  packet.readData(34+4, &seqnum, 4);
+  packet.readData(34+8, &acknum, 4);
+
+  packet.readData(34+13, &flagsByte, 1);
 
   Packet reply = packet.clone();
         
@@ -412,18 +420,29 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       if (syn){
         if (accept_requests.empty()){
           //connect가 먼저 실행되었을 때 accept를 기다리는 부분. 따라서 connect 대기 큐에 넣기.
-          connection_requests.emplace_back(destip, destport);
+          connect_requests.emplace_back(fromModule, std::move(packet));
           break;
         }
-        auto [syscallUUID, addr, addrlen] = accept_requests.front();
+        auto [syscallUUID, pid, addr, addrlen] = accept_requests.front();
         accept_requests.pop_front();
 
-        sendSYNACK(fromModule, std::move(packet), 34, flagsByte, srcport, destport, seqnum, acknum, srcip, destip);
-
-        //새 소켓 할당 후 addr, addrlen 적절히 추가
-
-        this->returnSystemCall(syscallUUID, 0);
-        
+        sendSYNACK(fromModule, std::move(packet));
+      
+        struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+        client_addr->sin_addr.s_addr = srcip; //번호가 묘하게 다르면 htons 써보기
+        client_addr->sin_port = srcport;
+      
+        // 새로운 소켓 파일 디스크립터 할당
+        int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
+        if (new_sockfd < 0) {
+            this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
+            return;
+        }
+      
+        // 새 소켓을 listen 상태로 설정
+        listen_table[{pid, new_sockfd}] = 0;
+      
+        this->returnSystemCall(syscallUUID, new_sockfd);
       }
       break;
     case (SYN_RCVD_state):

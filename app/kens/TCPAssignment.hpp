@@ -42,8 +42,8 @@ private:
 
   std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
   std::unordered_map<std::pair<int, int>, int> listen_table;
-  std::list<std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
-  std::list<std::tuple<std::string, Packet &&, uint8_t, uint16_t, uint16_t, uint16_t, uint16_t, uint32_t, uint32_t>> connection_requests;
+  std::list<std::tuple<UUID, int, struct sockaddr *, socklen_t *>> accept_requests;
+  std::list<std::pair<std::string, Packet &&>> connect_requests;
 
 public:
   TCPAssignment(Host &host);
@@ -61,7 +61,7 @@ protected:
   void syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);
   void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
   void syscall_close(UUID syscallUUID, int pid, int fd);
-  void sendSYNACK(std::string fromModule, Packet &&packet, uint8_t flagsByte, uint16_t srcport, uint16_t destport, uint16_t seqnum, uint16_t acknum, uint32_t srcip, uint32_t destip);
+  void sendSYNACK(std::string fromModule, Packet &&packet);
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
 };
 

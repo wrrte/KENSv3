@@ -166,9 +166,6 @@ protected:
         client_sockets.push_back(client_socket);
         client_ports.push_back(temp_addr.sin_port);
       }
-      else{
-        printf("%d %d\n", ret, client_socket);
-      }
 
       usleep(connect_period);
     }
