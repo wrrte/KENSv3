@@ -209,19 +209,23 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
     return;
   }
 
-  auto&& [fromModule, packet] = connect_requests.front();
+  auto [fromModule, packet] = connect_requests.front();
   connect_requests.pop_front();
 
   sendSYNACK(fromModule, std::move(packet));
 
-  uint16_t srcport;
-  uint32_t srcip;
+  uint16_t srcport, destport;
+  uint32_t srcip, destip;
   packet.readData(26, &srcip, 4);
   packet.readData(34, &srcport, 2);
 
+  packet.readData(30, &destip, 4);
+  packet.readData(34+2, &destport, 2);
+
   struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-  client_addr->sin_addr.s_addr = srcip; //번호가 묘하게 다르면 htons 써보기
-  client_addr->sin_port = srcport;
+  client_addr->sin_family = AF_INET;
+  client_addr->sin_addr.s_addr = destip;
+  client_addr->sin_port = destport;
 
   // 새로운 소켓 파일 디스크립터 할당
   int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
@@ -232,6 +236,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 
   // 새 소켓을 listen 상태로 설정
   listen_table[{pid, new_sockfd}] = 0;
+  bind_table[{pid, new_sockfd}] = {destip, destport};
 
   this->returnSystemCall(syscallUUID, new_sockfd);
 
@@ -248,60 +253,6 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   피어 주소는 후속 send() 함수에서 모든 데이터그램이 전송되는 위치를 식별하고 
   후속 recv() 함수에 대한 원격 발신자를 제한합니다. 
   주소가 프로토콜에 대한 널 주소인 경우, 소켓의 피어 주소는 재설정됩니다.
-  
-
-  this->returnSystemCall(syscallUUID, 0);
-  return;
-
-  if (!addr || addrlen < sizeof(struct sockaddr)) {
-    this->returnSystemCall(syscallUUID, -EINVAL);
-    return;
-  }
-
-  struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-  uint32_t peer_ip = sock_addr->sin_addr.s_addr;
-  uint16_t peer_port = sock_addr->sin_port;
-
-  if (bind_table.find({pid, sockfd}) == bind_table.end()) {
-      struct sockaddr_in auto_bind_addr;
-      auto_bind_addr.sin_family = AF_INET;
-      auto_bind_addr.sin_addr.s_addr = INADDR_ANY;  // 시스템에서 자동 할당
-      auto_bind_addr.sin_port = htons(rand() % (65535 - 1024) + 1024);  // 1024~65535 중 랜덤 포트
-
-      bind_table[{pid, sockfd}] = {auto_bind_addr.sin_addr.s_addr, auto_bind_addr.sin_port};
-  }
-
-  if (connection_table.find({pid, sockfd}) == connection_table.end()) {
-      // 연결 테이블에 추가
-      connection_table[{pid, sockfd}] = {peer_ip, peer_port};
-      this->returnSystemCall(syscallUUID, 0);
-      return;
-  }
-
-  
-  시작 소켓이 연결 모드인 경우 connect()는 주소 인자로 지정된 주소로 연결을 설정하려고 시도합니다. 
-  연결이 즉시 설정될 수 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되지 않은 경우, 
-  connect()는 연결이 설정될 때까지 지정되지 않은 시간 초과 간격까지 차단합니다. 
-  연결이 설정되기 전에 시간 초과 간격이 만료되면 connect()는 실패하고 연결 시도가 중단됩니다. 
-  연결 설정 대기 중 차단된 신호에 의해 connect()가 중단되면 connect()는 실패하고 
-  errno를 [EINTR]로 설정하지만 연결 요청은 중단되지 않으며 비동기적으로 연결이 설정됩니다.
-
-  연결을 즉시 설정할 수 없고 소켓의 파일 설명자에 O_NONBLOCK이 설정되어 있으면 
-  connect()가 실패하고 errno가 [EINPROGRESS]로 설정되지만 
-  연결 요청은 중단되지 않으며 비동기적으로 연결이 설정됩니다. 
-  연결이 설정되기 전에 동일한 소켓에 대한 후속 connect() 호출은 실패하고 errno가 [EALREADY]로 설정됩니다.
-
-  연결이 비동기적으로 설정되면 select() 및 poll()은 소켓의 파일 설명자를 쓸 준비가 되었음을 나타냅니다.
-
-  사용 중인 소켓은 프로세스에 connect() 함수를 사용하기 위한 적절한 권한이 필요할 수 있습니다.
-  
-
-  if(isNonBlocking(sockfd)){
-    this->returnSystemCall(syscallUUID, EINPROGRESS);
-    return;
-  }
-
-  this->returnSystemCall(syscallUUID, 0);
   */
 }
 
@@ -420,7 +371,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       if (syn){
         if (accept_requests.empty()){
           //connect가 먼저 실행되었을 때 accept를 기다리는 부분. 따라서 connect 대기 큐에 넣기.
-          connect_requests.emplace_back(fromModule, std::move(packet));
+          connect_requests.emplace_back(fromModule, std::move(packet.clone()));
           break;
         }
         auto [syscallUUID, pid, addr, addrlen] = accept_requests.front();
@@ -429,8 +380,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         sendSYNACK(fromModule, std::move(packet));
       
         struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-        client_addr->sin_addr.s_addr = srcip; //번호가 묘하게 다르면 htons 써보기
-        client_addr->sin_port = srcport;
+        client_addr->sin_family = AF_INET;
+        client_addr->sin_addr.s_addr = destip;
+        client_addr->sin_port = destport;
       
         // 새로운 소켓 파일 디스크립터 할당
         int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
@@ -441,6 +393,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       
         // 새 소켓을 listen 상태로 설정
         listen_table[{pid, new_sockfd}] = 0;
+        bind_table[{pid, new_sockfd}] = {destip, destport};
       
         this->returnSystemCall(syscallUUID, new_sockfd);
       }
