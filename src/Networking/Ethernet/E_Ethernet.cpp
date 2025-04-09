@@ -70,9 +70,9 @@ void Ethernet::packetArrived(std::string fromModule, Packet &&packet) {
       }
 
       if (!dst.has_value()) {
-        printf(
-            "Destination unreachable: %d.%d.%d.%d. Packet[%ld] is dropped.\n",
-            dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], packet.getUUID());
+        //printf(
+          //  "Destination unreachable: %d.%d.%d.%d. Packet[%ld] is dropped.\n",
+            //dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], packet.getUUID());
         return;
       }
 

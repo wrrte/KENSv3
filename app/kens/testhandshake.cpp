@@ -63,8 +63,6 @@ protected:
 
     std::vector<int> client_sockets;
 
-    printf("accept_count : %d\n", accept_count);
-
     for (int k = 0; k < accept_count; k++) {
       struct sockaddr_in client_addr;
       socklen_t client_len = sizeof(client_addr);
@@ -86,10 +84,6 @@ protected:
         EXPECT_EQ(addr.sin_port, temp_addr.sin_port);
 
         client_sockets.push_back(client_fd);
-        printf("success accept ret val : %d\n", client_fd);
-      }
-      else{
-        printf("fail accept ret val : %d\n", client_fd);
       }
       usleep(accept_period);
     }
@@ -144,7 +138,13 @@ protected:
       addr.sin_family = AF_INET;
       addr.sin_addr.s_addr = inet_addr(env["CONNECT_ADDR"].c_str());
       addr.sin_port = htons(atoi(env["CONNECT_PORT"].c_str()));
-
+      
+      /*
+      TestHandshake_Accept 클래스 안에 있는 socket, bind, listen, accept 함수는 
+      제대로 실행이 되는데, TestHandshake_Connect 클래스 안에 있는 socket, connect 함수는 
+      실행이 제대로 안 돼. 함수 문제는 아닌 게, connect 함수를 TestHandshake_Accept에서 실행시키면 
+      제대로 돌아가거든. 
+      */
       int ret = connect(client_socket, (struct sockaddr *)&addr, len);
       if (ret == 0) {
         struct sockaddr_in temp_addr;
