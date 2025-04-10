@@ -180,7 +180,7 @@ protected:
     return 0;
   }
 };
-//*
+/*
 TEST_F(TestEnv_Reliable, TestAccept_Backlog1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -410,7 +410,7 @@ TEST_F(TestEnv_Any, TestAccept_AfterAccept) {
 
   this->runTest();
 }
-//*/
+*/
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -475,7 +475,7 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
 
   this->runTest();
 }
-//*
+/*
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -725,4 +725,4 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   this->runTest();
 }
-//*/
+*/
