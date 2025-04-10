@@ -261,7 +261,7 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
 
   tcphdr header;
   packet.readData(34, &header, sizeof(tcphdr));
-
+  /*
   printf("\n\n\n==== TCP Header before ====\n");
   printf("Source Port       : %u\n", ntohs(header.th_sport));
   printf("Destination Port  : %u\n", ntohs(header.th_dport));
@@ -278,71 +278,46 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
   printf("Window Size       : %u\n", ntohs(header.th_win));
   printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
   printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
-
+*/
   uint32_t srcip, destip;
-  
+
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
+
+  Packet reply = packet.clone();
   
   uint8_t tcp_segment[sizeof(tcphdr)];
 
-  unsigned short chksum = header.th_sum;
-  
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin1 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin2 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
-  header.th_sum = 0;
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin3 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
-  packet.writeData(34, &header, sizeof(tcphdr));
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin4 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
-  header.th_sum = chksum;
-  packet.writeData(34, &header, sizeof(tcphdr));
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin5 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
-  header.th_sum = 0;
-  packet.writeData(34, &header, sizeof(tcphdr));
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  printf("origin6 result : 0x%x\n", ~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  printf("origin cheksum : 0x%x\n", chksum);
-  //(flag, acknum handling)
-  
-  //checksum field를 0으로 두고 계산
-  header.th_sum = 0;
-  packet.writeData(34, &header, sizeof(tcphdr));
-  memset(tcp_segment, 0, sizeof(tcp_segment));
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-
-  printf("%02x %02x\n", tcp_segment[16], tcp_segment[17]);
-
-  //이거 함수가 잘못된 것 같긴 함. 1의 보수인지 0의 보수인지 취해야 할 것 같달까.
-  header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
-
-  printf("%x\n", header.th_sum);
-  packet.writeData(34, &header, sizeof(tcphdr));
-  memset(tcp_segment, 0, sizeof(tcp_segment));
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  //보낼 패킷의 checksum 출력
-  printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
-  
-  /*
   ipv4_t dest_ip;
-
   packet.readData(26, &dest_ip, 4);
   int port = getRoutingTable(dest_ip);
   std::optional<ipv4_t> src_IP = getIPAddr(port);
-
   ipv4_t src_ip = src_IP.value();
-  packet.writeData(26, &src_ip, 4);
-  packet.writeData(30, &dest_ip, 4);
-  */
+  reply.writeData(26, &src_ip, 4);
+  reply.writeData(30, &dest_ip, 4);
+
+  std::swap(header.th_sport, header.th_dport);
+
+  header.th_ack = htonl(ntohl(header.th_seq) +1);
+
+  header.th_flags |= 0x12; //synack
+
+  
+  //checksum field를 0으로 두고 계산
+  header.th_sum = 0;
+  reply.writeData(34, &header, sizeof(tcphdr));
+  reply.readData(34, tcp_segment, sizeof(tcphdr));
+
+  header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+
+  reply.writeData(34, &header, sizeof(tcphdr));
+  reply.readData(34, tcp_segment, sizeof(tcphdr));
+  //보낼 패킷의 checksum 출력
+  //printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
+
+  sendPacket(fromModule, std::move(reply));
+
+  /*
   printf("==== TCP Header after ====\n");
   printf("Source Port       : %u\n", ntohs(header.th_sport));
   printf("Destination Port  : %u\n", ntohs(header.th_dport));
@@ -359,6 +334,7 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
   printf("Window Size       : %u\n", ntohs(header.th_win));
   printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
   printf("Urgent Pointer    : %u\n", ntohs(header.th_urp));
+  */
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
