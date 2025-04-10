@@ -345,38 +345,27 @@ void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
-  // 1. 패킷 파싱
-  uint8_t flagsByte;
-  uint16_t srcport, destport;
-  uint32_t srcip, destip, seqnum, acknum;
+  tcphdr header;
+  packet.readData(34, &header, sizeof(tcphdr)); 
+
+  uint32_t srcip, destip;
 
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
 
-  packet.readData(34, &srcport, 2);
-  packet.readData(34+2, &destport, 2);
-
-  packet.readData(34+4, &seqnum, 4);
-  packet.readData(34+8, &acknum, 4);
-
-  packet.readData(34+13, &flagsByte, 1);  // TCP 헤더의 13번째 바이트를 읽음
-
-  bool syn = flagsByte & 0x02;  // 0000 0010 → SYN
-  bool ack = flagsByte & 0x10;
-  bool fin = flagsByte & 0x01;
+  bool syn = header.th_flags & 0x02;  // 0000 0010 → SYN
+  bool ack = header.th_flags & 0x10;
+  bool fin = header.th_flags & 0x01;
 
   //source dest 주소 바꾸고, ack 번호는 seq # +1로 세팅하고,seq 번호는 seq 변수에 1 더해서 ㄱㄱ
-  if (ack){
-    TCP_state = ESTABLISHED_state;
-    printf("성공!");
-    global_backlog += 1;
-  }
+
   // 3. TCP 상태 전이 처리
   switch (TCP_state) {
     case (CLOSE_state):
 
     case (LISTEN_state):
       if (syn){
+        TCP_state = SYN_RCVD_state;
         if (accept_requests.empty()){
           //connect가 먼저 실행되었을 때 accept를 기다리는 부분. 따라서 connect 대기 큐에 넣기.
           connect_requests.emplace_back(fromModule, std::move(packet.clone()));
@@ -416,6 +405,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     case (SYN_RCVD_state):
       if (ack){
         TCP_state = ESTABLISHED_state;
+        printf("성공!");
         global_backlog += 1;
       }
       break;

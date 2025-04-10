@@ -202,9 +202,6 @@ TEST_F(TestEnv_Reliable, TestAccept_Backlog1) {
            ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
-  std::cout << "host1_ip: " << host1_ip << std::endl;
-
-
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
   accept_env["LISTEN_PORT"] = "9999";
   accept_env["BACKLOG"] = "3";
@@ -331,7 +328,7 @@ TEST_F(TestEnv_Reliable, TestAccept_Backlog2) {
 
   this->runTest();
 }
-/*
+
 TEST_F(TestEnv_Any, TestAccept_BeforeAccept) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -633,7 +630,7 @@ TEST_F(TestEnv_Any, TestConnect_AfterAccept) {
 
   this->runTest();
 }
-/*
+
 class TestHandshake_SimultaneousConnect : public TCPApplication {
 public:
   TestHandshake_SimultaneousConnect(
@@ -732,4 +729,3 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   this->runTest();
 }
-*/
