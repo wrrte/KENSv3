@@ -366,8 +366,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       }
     }
     if (Socket == nullptr){
-     
-
       //printf("error\n\n\n");
       return;
     }
@@ -422,10 +420,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     reply.writeData(34, &header, sizeof(tcphdr));
     reply.readData(34, tcp_segment, sizeof(tcphdr));
 
-    if(destip == 134260928){
-      printf("asdfasdfasdf\n");
-    }
-
     sendPacket(fromModule, std::move(reply));
 
     return;
@@ -456,12 +450,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       }
     }
     if (Socket == nullptr){
-      //printf("error\n\n\n");
       return;
-    }
-
-    if(destip == 134260928){
-      printf("asdfasdfasdf\n");
     }
   
     for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
