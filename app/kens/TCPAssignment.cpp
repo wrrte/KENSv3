@@ -179,23 +179,13 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   
   //usleep 한 다음에 취소하는 식으로 시간 제한 둬야 할지도
   if (accept_queue.empty()){
-    //accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
+    accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
+    
     return;
   }
 
-  auto [fromModule, packet] = accept_queue.front();
+  auto [srcip, destip, srcport, destport] = accept_queue.front();
   accept_queue.pop_front();
-
-  //sendSYNACK(fromModule, std::move(packet.clone()));
-  
-
-  uint16_t srcport, destport;
-  uint32_t srcip, destip;
-  packet.readData(26, &srcip, 4);
-  packet.readData(34, &srcport, 2);
-
-  packet.readData(30, &destip, 4);
-  packet.readData(34+2, &destport, 2);
 
   struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   client_addr->sin_family = AF_INET;
@@ -251,87 +241,7 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
   // addrlen을 업데이트 (호출한 프로세스가 변경된 크기를 알도록)
   *addrlen = sizeof(struct sockaddr_in);
 
-  this->returnSystemCall(syscallUUID, 0); // 성공
-}
-
-void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
-
-  tcphdr header;
-  packet.readData(34, &header, sizeof(tcphdr));
-  /*
-  printf("\n\n\n==== TCP Header before ====\n");
-  printf("Source Port       : %u\n", ntohs(header.th_sport));
-  printf("Destination Port  : %u\n", ntohs(header.th_dport));
-  printf("Sequence Number   : %u\n", ntohl(header.th_seq));
-  printf("Ack Number        : %u\n", ntohl(header.th_ack));
-  printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
-  printf("Flags             : 0x%02x\n", header.th_flags);
-  printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
-  printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
-  printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
-  printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
-  printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
-  printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
-  printf("Window Size       : %u\n", ntohs(header.th_win));
-  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
-  printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
-*/
-  uint32_t srcip, destip;
-
-  packet.readData(26, &srcip, 4);
-  packet.readData(30, &destip, 4);
-
-  Packet reply = packet.clone();
-  
-  uint8_t tcp_segment[sizeof(tcphdr)];
-
-  ipv4_t dest_ip;
-  packet.readData(26, &dest_ip, 4);
-  int port = getRoutingTable(dest_ip);
-  std::optional<ipv4_t> src_IP = getIPAddr(port);
-  ipv4_t src_ip = src_IP.value();
-  reply.writeData(26, &src_ip, 4);
-  reply.writeData(30, &dest_ip, 4);
-
-  std::swap(header.th_sport, header.th_dport);
-
-  header.th_ack = htonl(ntohl(header.th_seq) +1);
-
-  header.th_flags |= 0x12; //synack
-
-  
-  //checksum field를 0으로 두고 계산
-  header.th_sum = 0;
-  reply.writeData(34, &header, sizeof(tcphdr));
-  reply.readData(34, tcp_segment, sizeof(tcphdr));
-
-  header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
-
-  reply.writeData(34, &header, sizeof(tcphdr));
-  reply.readData(34, tcp_segment, sizeof(tcphdr));
-  //보낼 패킷의 checksum 출력
-  //printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
-
-  sendPacket(fromModule, std::move(reply));
-
-  /*
-  printf("==== TCP Header after ====\n");
-  printf("Source Port       : %u\n", ntohs(header.th_sport));
-  printf("Destination Port  : %u\n", ntohs(header.th_dport));
-  printf("Sequence Number   : %u\n", ntohl(header.th_seq));
-  printf("Ack Number        : %u\n", ntohl(header.th_ack));
-  printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
-  printf("Flags             : 0x%02x\n", header.th_flags);
-  printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
-  printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
-  printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
-  printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
-  printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
-  printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
-  printf("Window Size       : %u\n", ntohs(header.th_win));
-  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
-  printf("Urgent Pointer    : %u\n", ntohs(header.th_urp));
-  */
+  this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
@@ -360,88 +270,96 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
 
+    SYN_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
     left_connect_place--;
 
-    sendSYNACK(fromModule, std::move(packet.clone()));
+    tcphdr header;
+    packet.readData(34, &header, sizeof(tcphdr));
+    /*
+    printf("\n\n\n==== TCP Header before ====\n");
+    printf("Source Port       : %u\n", ntohs(header.th_sport));
+    printf("Destination Port  : %u\n", ntohs(header.th_dport));
+    printf("Sequence Number   : %u\n", ntohl(header.th_seq));
+    printf("Ack Number        : %u\n", ntohl(header.th_ack));
+    printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
+    printf("Flags             : 0x%02x\n", header.th_flags);
+    printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
+    printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
+    printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
+    printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
+    printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
+    printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
+    printf("Window Size       : %u\n", ntohs(header.th_win));
+    printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
+    printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
+    */
+    uint32_t srcip, destip;
+
+    packet.readData(26, &srcip, 4);
+    packet.readData(30, &destip, 4);
+
+    Packet reply = packet.clone();
+    
+    uint8_t tcp_segment[sizeof(tcphdr)];
+
+    ipv4_t dest_ip;
+    packet.readData(26, &dest_ip, 4);
+    int port = getRoutingTable(dest_ip);
+    std::optional<ipv4_t> src_IP = getIPAddr(port);
+    ipv4_t src_ip = src_IP.value();
+    reply.writeData(26, &src_ip, 4);
+    reply.writeData(30, &dest_ip, 4);
+
+    std::swap(header.th_sport, header.th_dport);
+    header.th_ack = htonl(ntohl(header.th_seq) +1);
+    header.th_flags |= 0x12; //synack
+
+    header.th_sum = 0;
+    reply.writeData(34, &header, sizeof(tcphdr));
+    reply.readData(34, tcp_segment, sizeof(tcphdr));
+
+    header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+
+    reply.writeData(34, &header, sizeof(tcphdr));
+    reply.readData(34, tcp_segment, sizeof(tcphdr));
+    //보낼 패킷의 checksum 출력
+    //printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
+
+    sendPacket(fromModule, std::move(reply));
+
     return;
   }
 
   if(ack){
-    left_connect_place++;
-    accept_queue.emplace_back(fromModule, std::move(packet));
-
-  }
-
-  // 3. TCP 상태 전이 처리
-  switch (TCP_state) {
-    case (CLOSE_state):
-      break;
-    case (LISTEN_state):
-      break;
-    case (SYN_RCVD_state):
-      if (ack){
-        TCP_state = ESTABLISHED_state;
-        printf("성공!");
-        left_connect_place += 1;
+    for (auto it = SYN_queue.begin(); it != SYN_queue.end(); ++it) {
+      if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
+        SYN_queue.erase(it);
+        left_connect_place++;
+        if (accept_requests.empty()){
+          accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
+          return;
+        }
+        auto [syscallUUID, pid, sockfd, addr, addrlen] = accept_requests.front();
+        accept_queue.pop_front();
+      
+        struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+        client_addr->sin_family = AF_INET;
+        client_addr->sin_addr.s_addr = destip;
+        client_addr->sin_port = header.th_dport;
+      
+        // 새로운 소켓 파일 디스크립터 할당
+        int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
+        if (new_sockfd < 0) {
+            this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
+            return;
+        }
+      
+        bind_table[{pid, new_sockfd}] = {destip, header.th_dport};
+      
+        this->returnSystemCall(syscallUUID, new_sockfd);
+        return;
       }
-      break;
-    case (SYN_SENT_state):
-      if (syn && ack){
-
-        Packet ACK(100);
-        uint16_t data = 0b0010; //ack
-        ACK.writeData(46, &data, 2);
-        sendPacket(fromModule, ACK);
-        TCP_state = SYN_RCVD_state;
-      }
-      break;
-    case (ESTABLISHED_state):
-      if (fin){
-        Packet FIN(100);
-        uint16_t data = 0b0001; //fin
-        FIN.writeData(46, &data, 2);
-        sendPacket(fromModule, FIN);
-        TCP_state = CLOSE_WAIT_state;
-      }
-      break;
-    case (CLOSE_WAIT_state):
-      break;
-    case (FIN_WAIT_1_state): 
-      if (fin){
-        Packet ACK(100);
-        uint16_t data = 0b0010; //ack
-        ACK.writeData(46, &data, 2);
-        if (ack) TCP_state = TIME_WAIT_state;
-        else TCP_state = CLOSING_state;
-      }
-      else if (ack){
-        TCP_state = FIN_WAIT_2_state;
-      }
-      break;
-    case (CLOSING_state):
-      if (ack){
-        TCP_state = TIME_WAIT_state;
-      }
-      break;
-    case (LAST_ACK_state):
-      if (ack){
-        TCP_state = CLOSE_state;
-      }
-      break;
-    case (FIN_WAIT_2_state):
-      if (fin){
-        Packet ACK(100);
-        uint16_t data = 0b0010; //ack
-        ACK.writeData(46, &data, 2);
-        TCP_state = TIME_WAIT_state;
-      }
-      break;
-    case (TIME_WAIT_state):
-      TCP_state = CLOSE_state;
-      break;
-    default:
-      break;
-  
+    }
   }
 }
 
