@@ -400,8 +400,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     int port = getRoutingTable(dest_ip);
     std::optional<ipv4_t> src_IP = getIPAddr(port);
     ipv4_t src_ip = src_IP.value();
-    reply.writeData(26, &src_ip, 4); 
-    reply.writeData(26, &Socket->ip, 4);
+    if(Socket->ip == 0){
+      reply.writeData(26, &src_ip, 4); 
+    }
+    else{reply.writeData(26, &Socket->ip, 4);}
+    
     reply.writeData(30, &dest_ip, 4);
     ipv4_t src_ip2;
     packet.readData(30, &src_ip2, 4);
