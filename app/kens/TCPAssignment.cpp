@@ -170,6 +170,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 
   it->second.listen_state = true;
   it->second.left_connect_place = backlog;
+  it->second.backlog = backlog;
   //printf("backlog : %d\n", backlog);
   this->returnSystemCall(syscallUUID, 0);
 }
@@ -350,9 +351,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
 
     SocketInfo* Socket = nullptr;
+    int pid, sockfd;
 
     for (auto& [key, info] : sock_table) {
-      if (info.ip == destip && info.port == header.th_dport) {
+      if (info.ip == destip && info.port == header.th_dport && info.listen_state == true) {
+        pid = key.first;
+        sockfd = key.second;
         Socket = &info;
         break;
       }
@@ -371,10 +375,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     }
 
     if(Socket->left_connect_place <= 0){
+      if(destip == 117483712){
+        //printf("%d%d ", pid, sockfd);
+      }
       return;
     }
     
     Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
+    printf("%d %d의 syn : %u %u %u %u\n", pid, sockfd, srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
 
     tcphdr header;
@@ -423,12 +431,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (ack && !syn){
 
+
     SocketInfo* Socket = nullptr;
 
     int pid, sockfd;
 
     for (auto& [key, info] : sock_table) {
-      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
         Socket = &info;
         pid = key.first;
         sockfd = key.second;
@@ -448,11 +457,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     if (Socket == nullptr){
       return;
     }
-  
+    
+    printf("%d %d가 찾을 건 : %u %u %u %u\n", pid, sockfd, srcip, destip, header.th_sport, header.th_dport);
     for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
+      printf("안에는 : %u %u %u %u\n", std::get<0>(*it), std::get<1>(*it), std::get<2>(*it), std::get<3>(*it));
       if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
         Socket->syn_queue.erase(it);
         Socket->left_connect_place++;
+
+        printf("분명 뺐다? pid:%d, sockfd:%d, lcp:%d\n", pid, sockfd, Socket->left_connect_place);
+        printf("id는 바로바로 %d\n", destip);
         if (Socket->accept_requests.empty()){
           Socket->accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
           return;
@@ -472,7 +486,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
             return;
         }
       
-        sock_table[{pid, new_sockfd}] = {destip, header.th_dport};
+        sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
 
         printf("ack : %d %d, %u %u\n", pid, new_sockfd, destip, header.th_dport);
       
@@ -480,6 +494,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         return;
       }
     }
+    printf("못찾음? \n");
   }
 
   if (syn && ack){
