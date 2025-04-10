@@ -44,7 +44,7 @@ private:
   std::unordered_map<std::pair<int, int>, int> listen_table;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> SYN_queue;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> accept_queue;
-  std::unordered_map<std::pair<uint32_t, uint16_t>, std::tuple<UUID, int, int>> SYNACK_queue;
+  std::unordered_map<std::pair<uint32_t, uint16_t>, UUID> SYNACK_queue;
   std::list<std::tuple<UUID, int, int, struct sockaddr *, socklen_t *>> accept_requests;
 
   int left_connect_place;

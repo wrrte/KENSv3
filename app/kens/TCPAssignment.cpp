@@ -302,7 +302,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
   printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
 */
-  SYNACK_queue[{destip, header.th_dport}] = {syscallUUID, pid, sockfd};
+  SYNACK_queue[{destip, header.th_dport}] = syscallUUID;
   //printf("%u %u\n", destip, ntohs(header.th_dport));
 
   this->returnSystemCall(syscallUUID, 0);
@@ -483,28 +483,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
     
-    const auto& [syscallUUID, pid, sockfd] = it->second;
+    UUID syscallUUID = it->second;
 
     tcphdr header;
     packet.readData(34, &header, sizeof(tcphdr));
-    /*
-    printf("\n\n\n==== TCP Header before ====\n");
-    printf("Source Port       : %u\n", ntohs(header.th_sport));
-    printf("Destination Port  : %u\n", ntohs(header.th_dport));
-    printf("Sequence Number   : %u\n", ntohl(header.th_seq));
-    printf("Ack Number        : %u\n", ntohl(header.th_ack));
-    printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
-    printf("Flags             : 0x%02x\n", header.th_flags);
-    printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
-    printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
-    printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
-    printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
-    printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
-    printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
-    printf("Window Size       : %u\n", ntohs(header.th_win));
-    printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
-    printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
-    */
+
     uint32_t srcip, destip;
 
     packet.readData(26, &srcip, 4);
