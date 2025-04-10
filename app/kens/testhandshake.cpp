@@ -80,7 +80,6 @@ protected:
         EXPECT_EQ(ret, 0);
         EXPECT_TRUE((addr.sin_addr.s_addr == 0) ||
                     (addr.sin_addr.s_addr == temp_addr.sin_addr.s_addr));
-        printf("how diff : %d %d\n", addr.sin_addr.s_addr, temp_addr.sin_addr.s_addr);
         EXPECT_EQ(addr.sin_family, temp_addr.sin_family);
         EXPECT_EQ(addr.sin_port, temp_addr.sin_port);
 

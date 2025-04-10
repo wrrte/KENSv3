@@ -373,10 +373,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     if(Socket->left_connect_place <= 0){
       return;
     }
-
-    if(destip == 134260928){
-      printf("asdfasdfasdf\n");
-    }
     
     Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
