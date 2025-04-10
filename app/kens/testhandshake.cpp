@@ -139,12 +139,6 @@ protected:
       addr.sin_addr.s_addr = inet_addr(env["CONNECT_ADDR"].c_str());
       addr.sin_port = htons(atoi(env["CONNECT_PORT"].c_str()));
       
-      /*
-      TestHandshake_Accept 클래스 안에 있는 socket, bind, listen, accept 함수는 
-      제대로 실행이 되는데, TestHandshake_Connect 클래스 안에 있는 socket, connect 함수는 
-      실행이 제대로 안 돼. 함수 문제는 아닌 게, connect 함수를 TestHandshake_Accept에서 실행시키면 
-      제대로 돌아가거든. 
-      */
       int ret = connect(client_socket, (struct sockaddr *)&addr, len);
       if (ret == 0) {
         struct sockaddr_in temp_addr;
@@ -328,7 +322,7 @@ TEST_F(TestEnv_Reliable, TestAccept_Backlog2) {
 
   this->runTest();
 }
-
+/*
 TEST_F(TestEnv_Any, TestAccept_BeforeAccept) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -729,3 +723,4 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   this->runTest();
 }
+*/

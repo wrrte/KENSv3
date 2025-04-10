@@ -27,7 +27,7 @@ void TCPAssignment::initialize() {
   seq = 0;
   bind_table.clear();
   listen_table.clear();
-  connect_requests.clear();
+  accept_queue.clear();
 }
 
 void TCPAssignment::finalize() {}
@@ -170,27 +170,24 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
   }
 
   // 소켓을 listen 상태로 변경
-  global_backlog = backlog;
-  TCP_state = LISTEN_state;
+  left_connect_place = backlog;
+  listen_table[{pid, sockfd}] = backlog;
   this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {  
-
-  if(global_backlog<=0){
-    return;
-  }
-
+  
   //usleep 한 다음에 취소하는 식으로 시간 제한 둬야 할지도
-  if (connect_requests.empty()){
-    accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
+  if (accept_queue.empty()){
+    //accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
     return;
   }
 
-  auto [fromModule, packet] = connect_requests.front();
-  connect_requests.pop_front();
+  auto [fromModule, packet] = accept_queue.front();
+  accept_queue.pop_front();
 
-  sendSYNACK(fromModule, std::move(packet.clone()));
+  //sendSYNACK(fromModule, std::move(packet.clone()));
+  
 
   uint16_t srcport, destport;
   uint32_t srcip, destip;
@@ -353,60 +350,39 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
 
-  bool syn = header.th_flags & 0x02;  // 0000 0010 → SYN
-  bool ack = header.th_flags & 0x10;
-  bool fin = header.th_flags & 0x01;
+  bool syn = header.th_flags & TH_SYN;  // 0000 0010 → SYN
+  bool ack = header.th_flags & TH_ACK;
+  bool fin = header.th_flags & TH_FIN;
 
-  //source dest 주소 바꾸고, ack 번호는 seq # +1로 세팅하고,seq 번호는 seq 변수에 1 더해서 ㄱㄱ
+  if (syn){
+
+    if(left_connect_place <= 0){
+      return;
+    }
+
+    left_connect_place--;
+
+    sendSYNACK(fromModule, std::move(packet.clone()));
+    return;
+  }
+
+  if(ack){
+    left_connect_place++;
+    accept_queue.emplace_back(fromModule, std::move(packet));
+
+  }
 
   // 3. TCP 상태 전이 처리
   switch (TCP_state) {
     case (CLOSE_state):
-
+      break;
     case (LISTEN_state):
-      if (syn){
-        TCP_state = SYN_RCVD_state;
-        if (accept_requests.empty()){
-          //connect가 먼저 실행되었을 때 accept를 기다리는 부분. 따라서 connect 대기 큐에 넣기.
-          connect_requests.emplace_back(fromModule, std::move(packet.clone()));
-          break;
-        }/*
-        auto [syscallUUID, pid, sockfd, addr, addrlen] = accept_requests.front();
-        accept_requests.pop_front();
-
-        sendSYNACK(fromModule, std::move(packet.clone()));
-      
-        struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-        client_addr->sin_family = AF_INET;
-        client_addr->sin_addr.s_addr = destip;
-        client_addr->sin_port = destport;
-      
-        // 새로운 소켓 파일 디스크립터 할당
-        int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
-        if (new_sockfd < 0) {
-            this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
-            return;
-        }
-      
-        // 새 소켓을 listen 상태로 설정
-        listen_table[{pid, new_sockfd}] = 0;
-        global_backlog -= 1;
-
-        ipv4_t dest_ip;
-
-        packet.readData(30, &dest_ip, 4);
-        int port = getRoutingTable(dest_ip);
-
-        bind_table[{pid, new_sockfd}] = {destip, destport};
-      
-        this->returnSystemCall(syscallUUID, new_sockfd);*/
-      }
       break;
     case (SYN_RCVD_state):
       if (ack){
         TCP_state = ESTABLISHED_state;
         printf("성공!");
-        global_backlog += 1;
+        left_connect_place += 1;
       }
       break;
     case (SYN_SENT_state):
