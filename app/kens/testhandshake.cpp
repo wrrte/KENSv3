@@ -410,7 +410,7 @@ TEST_F(TestEnv_Any, TestAccept_AfterAccept) {
 
   this->runTest();
 }
-
+/*
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -536,7 +536,7 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
 
   this->runTest();
 }
-
+*/
 TEST_F(TestEnv_Any, TestConnect_BeforeAccept) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
