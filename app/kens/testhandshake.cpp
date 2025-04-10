@@ -80,6 +80,7 @@ protected:
         EXPECT_EQ(ret, 0);
         EXPECT_TRUE((addr.sin_addr.s_addr == 0) ||
                     (addr.sin_addr.s_addr == temp_addr.sin_addr.s_addr));
+        printf("how diff : %d %d\n", addr.sin_addr.s_addr, temp_addr.sin_addr.s_addr);
         EXPECT_EQ(addr.sin_family, temp_addr.sin_family);
         EXPECT_EQ(addr.sin_port, temp_addr.sin_port);
 
@@ -180,7 +181,7 @@ protected:
     return 0;
   }
 };
-/*
+//*
 TEST_F(TestEnv_Reliable, TestAccept_Backlog1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -410,7 +411,7 @@ TEST_F(TestEnv_Any, TestAccept_AfterAccept) {
 
   this->runTest();
 }
-*/
+//*/
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -475,7 +476,7 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
 
   this->runTest();
 }
-/*
+
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -536,9 +537,11 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
   host1->launchApplication(server2_pid);
   host2->launchApplication(client2_pid);
 
+  printf("%d : 4, %d : 2\n",inet_addr(host1_ip.c_str()), inet_addr(host1_ip2.c_str()));
+
   this->runTest();
 }
-
+//*
 TEST_F(TestEnv_Any, TestConnect_BeforeAccept) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -725,4 +728,4 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   this->runTest();
 }
-*/
+//*/

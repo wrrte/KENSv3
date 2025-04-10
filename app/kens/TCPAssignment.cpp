@@ -178,7 +178,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   
   //usleep 한 다음에 취소하는 식으로 시간 제한 둬야 할지도
   if (accept_queue.empty()){
-    accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
+    accept_requests[{pid, sockfd}] = {syscallUUID, addr, addrlen};
     return;
   }
 
@@ -198,6 +198,8 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   }
 
   sock_table[{pid, new_sockfd}] = {destip, destport, false, 0, {}};
+
+  printf("accept : %u %u\n", destip, destport);
 
   this->returnSystemCall(syscallUUID, new_sockfd);
 
@@ -366,12 +368,20 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     SocketInfo* Socket = nullptr;
 
     for (auto& [key, info] : sock_table) {
-      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+      if (info.ip == destip && info.port == header.th_dport) {
         Socket = &info;
         break;
       }
     }
     if (Socket == nullptr) {
+      for (auto& [key, info] : sock_table) {
+        if (info.ip == 0 && info.port == header.th_dport) {
+          Socket = &info;
+          break;
+        }
+      }
+    }
+    if (Socket == nullptr){
       return;
     }
     if(Socket->left_connect_place <= 0){
@@ -415,12 +425,15 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     int port = getRoutingTable(dest_ip);
     std::optional<ipv4_t> src_IP = getIPAddr(port);
     ipv4_t src_ip = src_IP.value();
-    reply.writeData(26, &src_ip, 4); //reply.writeData(26, &Socket->ip, 4);
+    reply.writeData(26, &src_ip, 4); 
+    //reply.writeData(26, &Socket->ip, 4);
     reply.writeData(30, &dest_ip, 4);
+    ipv4_t src_ip2;
+    packet.readData(30, &src_ip2, 4);
 
-    printf("dest_ip : %u.%u.%u.%u, port : %u\n", dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_dport);
-    printf("port %d : %u.%u.%u.%u, port : %u\n", port, src_ip[0], src_ip[1], src_ip[2], src_ip[3], header.th_sport);
-    printf("%u %u\n", Socket->ip, Socket->port);
+    //printf("dest_ip : %u.%u.%u.%u, port : %u\n", dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_dport);
+    //printf("port %d : %u.%u.%u.%u, port : %u\n", port, src_ip2[0], src_ip2[1], src_ip2[2], src_ip2[3], header.th_sport);
+    //printf("%u %u\n", Socket->ip, Socket->port);
 
     std::swap(header.th_sport, header.th_dport);
     header.th_ack = htonl(ntohl(header.th_seq) +1);
@@ -446,16 +459,31 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     SocketInfo* Socket = nullptr;
 
+    int pid, sockfd;
+
     for (auto& [key, info] : sock_table) {
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
         Socket = &info;
+        pid = key.first;
+        sockfd = key.second;
         break;
       }
     }
-  
-    if (Socket == nullptr) {
+    if (Socket == nullptr){
       return;
     }
+    /*
+    ipv4_t dest_ip;
+    packet.readData(26, &dest_ip, 4);
+    int port = getRoutingTable(dest_ip);
+    std::optional<ipv4_t> src_IP = getIPAddr(port);
+    ipv4_t src_ip = src_IP.value();
+    ipv4_t src_ip2;
+    packet.readData(30, &src_ip2, 4);
+    */
+    //printf("dest_ip : %u.%u.%u.%u, port : %u\n", dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_dport);
+    //printf("port %d : %u.%u.%u.%u, port : %u\n", port, src_ip2[0], src_ip2[1], src_ip2[2], src_ip2[3], header.th_sport);
+    //printf("%u %u\n", Socket->ip, Socket->port);
   
     for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
       if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
@@ -465,8 +493,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
           accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
           return;
         }
-        auto [syscallUUID, pid, sockfd, addr, addrlen] = accept_requests.front();
-        accept_requests.pop_front();
+        auto [syscallUUID, addr, addrlen] = accept_requests[{pid, sockfd}];
+        accept_requests.erase({pid, sockfd});
       
         struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
         client_addr->sin_family = AF_INET;
@@ -481,6 +509,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         }
       
         sock_table[{pid, new_sockfd}] = {destip, header.th_dport};
+
+        printf("ack : %d %d, %u %u\n", pid, new_sockfd, destip, header.th_dport);
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
