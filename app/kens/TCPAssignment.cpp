@@ -25,7 +25,7 @@ TCPAssignment::~TCPAssignment() {}
 void TCPAssignment::initialize() {
   TCP_state = CLOSE_state;
   seq = 123456;
-  bind_table.clear();
+  sock_table.clear();
   accept_queue.clear();
   SYNACK_queue.clear();
 }
@@ -120,8 +120,8 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   uint32_t ip_addr = sock_addr->sin_addr.s_addr;
   uint16_t port = sock_addr->sin_port;
 
-  auto IPnPort = bind_table.find({pid, sockfd});
-  if (IPnPort != bind_table.end()) {
+  auto IPnPort = sock_table.find({pid, sockfd});
+  if (IPnPort != sock_table.end()) {
       uint32_t existing_ip = IPnPort->second.ip;
       uint16_t existing_port = IPnPort->second.port;
 
@@ -135,7 +135,7 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   }
 
   // 바인딩된 주소/포트 중복 확인
-  for (const auto &[key, value] : bind_table) {
+  for (const auto &[key, value] : sock_table) {
       uint32_t bound_ip = value.ip;
       uint16_t bound_port = value.port;
 
@@ -147,14 +147,14 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   }
 
   // 바인딩 정보 저장
-  bind_table[{pid, sockfd}] = {ip_addr, port, false};
+  sock_table[{pid, sockfd}] = {ip_addr, port, false};
   this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) {
   // 소켓이 바인딩되었는지 확인
-  auto it = bind_table.find({pid, sockfd});
-  if (it == bind_table.end()) {
+  auto it = sock_table.find({pid, sockfd});
+  if (it == sock_table.end()) {
       this->returnSystemCall(syscallUUID, EINVAL); // 바인딩되지 않은 소켓
       return;
   }
@@ -169,9 +169,8 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
     backlog = 0;
   }
 
-  // 소켓을 listen 상태로 변경
-  left_connect_place = backlog;
-  it->second.backlog = backlog;
+  it->second.listen_state = true;
+  it->second.left_connect_place = backlog;
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -180,7 +179,6 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   //usleep 한 다음에 취소하는 식으로 시간 제한 둬야 할지도
   if (accept_queue.empty()){
     accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
-    
     return;
   }
 
@@ -199,7 +197,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
       return;
   }
 
-  bind_table[{pid, new_sockfd}] = {destip, destport};
+  sock_table[{pid, new_sockfd}] = {destip, destport, false, 0, {}};
 
   this->returnSystemCall(syscallUUID, new_sockfd);
 
@@ -209,7 +207,7 @@ uint16_t TCPAssignment::allocateEphemeralPort() {
   printf("random port use \n\n\n\n");
   for (uint16_t port = 49152; port <= 65535; ++port) {
       bool used = false;
-      for (const auto& [key, value] : bind_table) {
+      for (const auto& [key, value] : sock_table) {
           if (value.port == port) {
               used = true;
               break;
@@ -221,19 +219,6 @@ uint16_t TCPAssignment::allocateEphemeralPort() {
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
-  /*
-  
-  소켓이 아직 로컬 주소에 바인딩되지 않은 경우, 
-  connect()는 소켓의 주소 패밀리가 AF_UNIX가 아니라면 사용하지 않는 로컬 주소인 주소에 소켓을 바인딩합니다.
-
-  시작 소켓이 연결 모드가 아닌 경우 connect()는 소켓의 피어 주소를 설정하고 연결이 이루어지지 않습니다. 
-  SOCK_DGRAM 소켓의 경우, 
-  피어 주소는 후속 send() 함수에서 모든 데이터그램이 전송되는 위치를 식별하고 
-  후속 recv() 함수에 대한 원격 발신자를 제한합니다. 
-  주소가 프로토콜에 대한 널 주소인 경우, 소켓의 피어 주소는 재설정됩니다.
-  */
-
-
 
   Packet packet (54);
   tcphdr header;
@@ -254,13 +239,13 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   packet.readData(26, &srcip, 4);
   
-  auto it = bind_table.find({pid, sockfd});
-  if (it == bind_table.end()) {
+  auto it = sock_table.find({pid, sockfd});
+  if (it == sock_table.end()) {
     header.th_sport = htons(12345);
-    bind_table[{pid, sockfd}] = {srcip, header.th_sport};
+    sock_table[{pid, sockfd}] = {srcip, header.th_sport};
   }
   else{
-    header.th_sport = bind_table[{pid, sockfd}].port;
+    header.th_sport = sock_table[{pid, sockfd}].port;
   }
 
   uint8_t tcp_segment[sizeof(tcphdr)];
@@ -278,9 +263,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   packet.writeData(34, &header, sizeof(tcphdr));
   packet.readData(34, tcp_segment, sizeof(tcphdr));
 
-
-
-  bind_table[{pid, sockfd}] = {destip, header.th_dport};
+  sock_table[{pid, sockfd}] = {destip, header.th_dport};
 
   sendPacket("IPv4", std::move(packet));
 /*
@@ -309,8 +292,8 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
 void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   // fd가 바인딩되어 있는지 확인
-  auto it = bind_table.find({pid, sockfd});
-  if (it == bind_table.end()) {
+  auto it = sock_table.find({pid, sockfd});
+  if (it == sock_table.end()) {
       this->returnSystemCall(syscallUUID, -EBADF); // 해당 소켓이 존재하지 않음
       return;
   }
@@ -334,8 +317,8 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
 
 void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen){
     // fd가 바인딩되어 있는지 확인
-  auto it = bind_table.find({pid, sockfd});
-  if (it == bind_table.end()) {
+  auto it = sock_table.find({pid, sockfd});
+  if (it == sock_table.end()) {
       this->returnSystemCall(syscallUUID, -EBADF); // 해당 소켓이 존재하지 않음
       return;
   }
@@ -358,7 +341,7 @@ void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, s
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
-  bind_table.erase({pid, fd});
+  sock_table.erase({pid, fd});
   this->removeFileDescriptor(pid, fd);
   this->returnSystemCall(syscallUUID, 0);
 }
@@ -377,14 +360,26 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   bool ack = header.th_flags & TH_ACK;
   bool fin = header.th_flags & TH_FIN;
 
+
   if (syn && !ack){
 
-    if(left_connect_place <= 0){
+    SocketInfo* Socket = nullptr;
+
+    for (auto& [key, info] : sock_table) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+        Socket = &info;
+        break;
+      }
+    }
+    if (Socket == nullptr) {
+      return;
+    }
+    if(Socket->left_connect_place <= 0){
       return;
     }
 
-    SYN_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
-    left_connect_place--;
+    Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
+    Socket->left_connect_place--;
 
     tcphdr header;
     packet.readData(34, &header, sizeof(tcphdr));
@@ -420,8 +415,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     int port = getRoutingTable(dest_ip);
     std::optional<ipv4_t> src_IP = getIPAddr(port);
     ipv4_t src_ip = src_IP.value();
-    reply.writeData(26, &src_ip, 4);
+    reply.writeData(26, &src_ip, 4); //reply.writeData(26, &Socket->ip, 4);
     reply.writeData(30, &dest_ip, 4);
+
+    printf("dest_ip : %u.%u.%u.%u, port : %u\n", dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_dport);
+    printf("port %d : %u.%u.%u.%u, port : %u\n", port, src_ip[0], src_ip[1], src_ip[2], src_ip[3], header.th_sport);
+    printf("%u %u\n", Socket->ip, Socket->port);
 
     std::swap(header.th_sport, header.th_dport);
     header.th_ack = htonl(ntohl(header.th_seq) +1);
@@ -444,10 +443,24 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   }
 
   if (ack && !syn){
-    for (auto it = SYN_queue.begin(); it != SYN_queue.end(); ++it) {
+
+    SocketInfo* Socket = nullptr;
+
+    for (auto& [key, info] : sock_table) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+        Socket = &info;
+        break;
+      }
+    }
+  
+    if (Socket == nullptr) {
+      return;
+    }
+  
+    for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
       if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
-        SYN_queue.erase(it);
-        left_connect_place++;
+        Socket->syn_queue.erase(it);
+        Socket->left_connect_place++;
         if (accept_requests.empty()){
           accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
           return;
@@ -467,7 +480,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
             return;
         }
       
-        bind_table[{pid, new_sockfd}] = {destip, header.th_dport};
+        sock_table[{pid, new_sockfd}] = {destip, header.th_dport};
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
@@ -476,6 +489,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   }
 
   if (syn && ack){
+    
     auto it = SYNACK_queue.find({srcip, header.th_sport});
     if (it == SYNACK_queue.end()) {
       return;

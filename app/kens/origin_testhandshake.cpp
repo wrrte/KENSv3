@@ -26,7 +26,7 @@ using namespace E;
 class TestHandshake_Accept : public TCPApplication {
 public:
   TestHandshake_Accept(Host &host,
-                       const std::unordered_map<std::string, std::string> &env)
+                      const std::unordered_map<std::string, std::string> &env)
       : TCPApplication(host) {
     this->env = env;
   }
@@ -180,7 +180,7 @@ protected:
     return 0;
   }
 };
-//*
+
 TEST_F(TestEnv_Reliable, TestAccept_Backlog1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -190,10 +190,10 @@ TEST_F(TestEnv_Reliable, TestAccept_Backlog1) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -263,10 +263,10 @@ TEST_F(TestEnv_Reliable, TestAccept_Backlog2) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -332,10 +332,10 @@ TEST_F(TestEnv_Any, TestAccept_BeforeAccept) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -376,10 +376,10 @@ TEST_F(TestEnv_Any, TestAccept_AfterAccept) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -410,7 +410,7 @@ TEST_F(TestEnv_Any, TestAccept_AfterAccept) {
 
   this->runTest();
 }
-//*/
+
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -421,16 +421,14 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1_2[0], ip1_2[1],
-           ip1_2[2], ip1_2[3]);
+          ip1_2[2], ip1_2[3]);
   std::string host1_ip2(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
-
-  printf("host1_ip  : %s\nhost1_ip2 : %s\nhost2_ip : %s\n", host1_ip.c_str(), host1_ip2.c_str(), host2_ip.c_str());
 
   accept_env["LISTEN_PORT"] = "9999";
   accept_env["BACKLOG"] = "1";
@@ -475,7 +473,7 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
 
   this->runTest();
 }
-//*
+
 TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
   std::unordered_map<std::string, std::string> accept_env;
   std::unordered_map<std::string, std::string> connect_env;
@@ -486,13 +484,13 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1_2[0], ip1_2[1],
-           ip1_2[2], ip1_2[3]);
+          ip1_2[2], ip1_2[3]);
   std::string host1_ip2(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_PORT"] = "9999";
@@ -548,10 +546,10 @@ TEST_F(TestEnv_Any, TestConnect_BeforeAccept) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -592,10 +590,10 @@ TEST_F(TestEnv_Any, TestConnect_AfterAccept) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   accept_env["LISTEN_ADDR"] = "0.0.0.0";
@@ -695,10 +693,10 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   char str_buffer[128];
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip1[0], ip1[1],
-           ip1[2], ip1[3]);
+          ip1[2], ip1[3]);
   std::string host1_ip(str_buffer);
   snprintf(str_buffer, sizeof(str_buffer), "%u.%u.%u.%u", ip2[0], ip2[1],
-           ip2[2], ip2[3]);
+          ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
   connect_env["CONNECT_ADDR"] = host2_ip;
@@ -725,4 +723,3 @@ TEST_F(TestEnv_Any, TestConnect_SimultaneousConnect) {
 
   this->runTest();
 }
-//*/
