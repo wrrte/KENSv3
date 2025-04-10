@@ -85,9 +85,6 @@ protected:
 
         client_sockets.push_back(client_fd);
       }
-      else{
-        printf("not accept because : %d\n", ret);
-      }
       usleep(accept_period);
     }
 
@@ -433,8 +430,6 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface1) {
            ip2[2], ip2[3]);
   std::string host2_ip(str_buffer);
 
-  printf("host1_ip  : %s\nhost1_ip2 : %s\nhost2_ip : %s\n", host1_ip.c_str(), host1_ip2.c_str(), host2_ip.c_str());
-
   accept_env["LISTEN_PORT"] = "9999";
   accept_env["BACKLOG"] = "1";
   accept_env["LISTEN_TIME"] = "0";
@@ -538,8 +533,6 @@ TEST_F(TestEnv_Any, TestAccept_MultipleInterface2) {
   host2->launchApplication(client1_pid);
   host1->launchApplication(server2_pid);
   host2->launchApplication(client2_pid);
-
-  printf("%d : 4, %d : 2\n",inet_addr(host1_ip.c_str()), inet_addr(host1_ip2.c_str()));
 
   this->runTest();
 }

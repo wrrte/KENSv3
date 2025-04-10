@@ -200,14 +200,11 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 
   sock_table[{pid, new_sockfd}] = {destip, destport, false, 0, {}};
 
-  printf("accept : %u %u\n", destip, destport);
-
   this->returnSystemCall(syscallUUID, new_sockfd);
 
 }
 
 uint16_t TCPAssignment::allocateEphemeralPort() {
-  printf("random port use \n\n\n\n");
   for (uint16_t port = 49152; port <= 65535; ++port) {
       bool used = false;
       for (const auto& [key, value] : sock_table) {
@@ -370,19 +367,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       }
     }
     if (Socket == nullptr){
-      //printf("error\n\n\n");
       return;
     }
 
     if(Socket->left_connect_place <= 0){
       if(destip == 117483712){
-        //printf("%d%d ", pid, sockfd);
       }
       return;
     }
     
     Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
-    printf("%d %d의 syn : %u %u %u %u\n", pid, sockfd, srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
 
     tcphdr header;
@@ -458,15 +452,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
     
-    printf("%d %d가 찾을 건 : %u %u %u %u\n", pid, sockfd, srcip, destip, header.th_sport, header.th_dport);
     for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
-      printf("안에는 : %u %u %u %u\n", std::get<0>(*it), std::get<1>(*it), std::get<2>(*it), std::get<3>(*it));
       if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
         Socket->syn_queue.erase(it);
         Socket->left_connect_place++;
 
-        printf("분명 뺐다? pid:%d, sockfd:%d, lcp:%d\n", pid, sockfd, Socket->left_connect_place);
-        printf("id는 바로바로 %d\n", destip);
         if (Socket->accept_requests.empty()){
           Socket->accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
           return;
@@ -487,14 +477,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         }
       
         sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
-
-        printf("ack : %d %d, %u %u\n", pid, new_sockfd, destip, header.th_dport);
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
       }
     }
-    printf("못찾음? \n");
   }
 
   if (syn && ack){
