@@ -26,6 +26,7 @@ void TCPAssignment::initialize() {
   TCP_state = CLOSE_state;
   seq = 0;
   bind_table.clear();
+  listen_table.clear();
   connect_requests.clear();
 }
 
@@ -101,30 +102,6 @@ void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int ty
   this->returnSystemCall(syscallUUID, fd);
 }
 
-void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) {
-  // 소켓이 바인딩되었는지 확인
-  auto it = bind_table.find({pid, sockfd});
-  if (it == bind_table.end()) {
-      this->returnSystemCall(syscallUUID, EINVAL); // 바인딩되지 않은 소켓
-      return;
-  }
-
-  // 이미 listen 상태인지 확인
-  if (listen_table.find({pid, sockfd}) != listen_table.end()) {
-      this->returnSystemCall(syscallUUID, 0); // 이미 listen 상태라면 성공
-      return;
-  }
-
-  if (backlog < 0) {
-    backlog = 0;
-  }
-
-  // 소켓을 listen 상태로 변경
-  listen_table[{pid, sockfd}] = backlog;
-  TCP_state = LISTEN_state;
-  this->returnSystemCall(syscallUUID, 0);
-}
-
 void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
   
   if (!addr || addrlen < sizeof(struct sockaddr_in)) {
@@ -174,45 +151,46 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   this->returnSystemCall(syscallUUID, 0);
 }
 
+void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) {
+  // 소켓이 바인딩되었는지 확인
+  auto it = bind_table.find({pid, sockfd});
+  if (it == bind_table.end()) {
+      this->returnSystemCall(syscallUUID, EINVAL); // 바인딩되지 않은 소켓
+      return;
+  }
+
+  // 이미 listen 상태인지 확인
+  if (listen_table.find({pid, sockfd}) != listen_table.end()) {
+      this->returnSystemCall(syscallUUID, 0); // 이미 listen 상태라면 성공
+      return;
+  }
+
+  if (backlog < 0) {
+    backlog = 0;
+  }
+
+  // 소켓을 listen 상태로 변경
+  global_backlog = backlog;
+  TCP_state = LISTEN_state;
+  this->returnSystemCall(syscallUUID, 0);
+}
+
 void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen) {  
 
-  /*
-  주소가 널 포인터가 아닌 경우, 수락된 연결에 대한 피어의 주소는 주소가 가리키는 sockaddr 구조체에 저장되며, 
-  이 주소의 길이는 address_len이 가리키는 객체에 저장됩니다.
+  if(global_backlog<=0){
+    return;
+  }
 
-  주소의 실제 길이가 제공된 sockaddr 구조체의 길이보다 크면, 저장된 주소는 잘립니다.
-
-  프로토콜이 바인딩되지 않은 클라이언트의 연결을 허용하고 피어가 바인딩되지 않은 경우, 
-  주소가 가리키는 객체에 저장된 값은 지정되지 않은 값입니다.
-
-  수신 대기열에 연결 요청이 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되지 않은 경우, 
-  연결이 있을 때까지 accept()가 차단됩니다. 
-  listen() 큐에 연결 요청이 없고 소켓의 파일 기술자에 O_NONBLOCK이 설정되어 있으면 
-  accept()는 실패하고 errno를 [EAGAIN] 또는 [EWOULDDBLOCK]으로 설정합니다.
-
-  수락된 소켓은 자체적으로 더 많은 연결을 수락할 수 없습니다. 
-  원래 소켓은 열린 상태로 유지되며 더 많은 연결을 수락할 수 있습니다.
-  */
-
-  //connect 큐 확인해서 있으면 그거 받고 할거 다 실행하고 리턴. 없으면 accept큐에 넣어두기.
-
+  //usleep 한 다음에 취소하는 식으로 시간 제한 둬야 할지도
   if (connect_requests.empty()){
-
-    auto listen_it = listen_table.find({pid, sockfd});
-    if (listen_it == listen_table.end()) {
-        // listen 상태가 아닌 소켓은 오류
-        this->returnSystemCall(syscallUUID, EINVAL);
-        return;
-    }
-
-    accept_requests.emplace_back(syscallUUID, pid, addr, addrlen);
+    accept_requests.emplace_back(syscallUUID, pid, sockfd, addr, addrlen);
     return;
   }
 
   auto [fromModule, packet] = connect_requests.front();
   connect_requests.pop_front();
 
-  sendSYNACK(fromModule, std::move(packet));
+  sendSYNACK(fromModule, std::move(packet.clone()));
 
   uint16_t srcport, destport;
   uint32_t srcip, destip;
@@ -234,8 +212,6 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
       return;
   }
 
-  // 새 소켓을 listen 상태로 설정
-  listen_table[{pid, new_sockfd}] = 0;
   bind_table[{pid, new_sockfd}] = {destip, destport};
 
   this->returnSystemCall(syscallUUID, new_sockfd);
@@ -283,54 +259,84 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
 
 void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
 
-  uint8_t flagsByte;
-  uint16_t srcport, destport, seqnum, acknum;
-  uint32_t srcip, destip;
+  tcphdr header;
+  packet.readData(34, &header, sizeof(tcphdr));
 
+  printf("\n\n\n==== TCP Header before ====\n");
+  printf("Source Port       : %u\n", ntohs(header.th_sport));
+  printf("Destination Port  : %u\n", ntohs(header.th_dport));
+  printf("Sequence Number   : %u\n", ntohl(header.th_seq));
+  printf("Ack Number        : %u\n", ntohl(header.th_ack));
+  printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
+  printf("Flags             : 0x%02x\n", header.th_flags);
+  printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
+  printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
+  printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
+  printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
+  printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
+  printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
+  printf("Window Size       : %u\n", ntohs(header.th_win));
+  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
+  printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
+
+  uint32_t srcip, destip;
+  
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
+  
+  uint8_t tcp_segment[1500];
+  
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  
+  //받은 패킷의 checksum 바로 출력
+  printf("origin result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  
+  //(flag, acknum handling)
+  
+  //checksum field를 0으로 두고 계산
+  header.th_sum = 0;
+  packet.writeData(34, &header, sizeof(tcphdr));
+  memset(tcp_segment, 0, sizeof(tcp_segment));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
 
-  packet.readData(34, &srcport, 2);
-  packet.readData(34+2, &destport, 2);
+  printf("%02x %02x\n", tcp_segment[16], tcp_segment[17]);
 
-  packet.readData(34+4, &seqnum, 4);
-  packet.readData(34+8, &acknum, 4);
+  header.th_sum = ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr)));
 
-  packet.readData(34+13, &flagsByte, 1);
-
-  Packet reply = packet.clone();
-        
+  printf("%x\n", header.th_sum);
+  packet.writeData(34, &header, sizeof(tcphdr));
+  memset(tcp_segment, 0, sizeof(tcp_segment));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  //보낼 패킷의 checksum 출력
+  printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
+  
+  /*
   ipv4_t dest_ip;
 
-  packet.readData(26, &dest_ip, 4);;
+  packet.readData(26, &dest_ip, 4);
   int port = getRoutingTable(dest_ip);
   std::optional<ipv4_t> src_IP = getIPAddr(port);
 
-  reply.writeData(26, &src_IP, 4);
-  reply.writeData(30, &dest_ip, 4);
-
-  reply.writeData(34, &destport, 2);
-  reply.writeData(34+2, &srcport, 2);
-
-  acknum = seqnum +1;
-  reply.writeData(34+8, &acknum, 4);
-
-  flagsByte |= 0x12; //synack
-  reply.writeData(34+13, &flagsByte, 1);
-
-  uint8_t tcp_segment[1500];
-  packet.readData(34, tcp_segment, packet.getSize());
-
-  uint32_t sum1 = 0, sum2 = 0;
-  for (size_t k = 0; k < 4; k++) {
-    sum1 += (((uint32_t)src_IP.value()[k]) << (8 * k));
-    sum2 += (((uint32_t)dest_ip[k]) << (8 * k));
-  }
-
-  uint16_t checksum = NetworkUtil::tcp_sum(sum1, sum2, tcp_segment, reply.getSize());
-  reply.writeData(34+16, &checksum, 2);
-
-  sendPacket(fromModule, std::move(reply));
+  ipv4_t src_ip = src_IP.value();
+  packet.writeData(26, &src_ip, 4);
+  packet.writeData(30, &dest_ip, 4);
+  */
+  printf("==== TCP Header after ====\n");
+  printf("Source Port       : %u\n", ntohs(header.th_sport));
+  printf("Destination Port  : %u\n", ntohs(header.th_dport));
+  printf("Sequence Number   : %u\n", ntohl(header.th_seq));
+  printf("Ack Number        : %u\n", ntohl(header.th_ack));
+  printf("Data Offset       : %u (words of 4 bytes)\n", header.th_off);
+  printf("Flags             : 0x%02x\n", header.th_flags);
+  printf("    URG: %d\n", (header.th_flags & 0x20) != 0);
+  printf("    ACK: %d\n", (header.th_flags & 0x10) != 0);
+  printf("    PSH: %d\n", (header.th_flags & 0x08) != 0);
+  printf("    RST: %d\n", (header.th_flags & 0x04) != 0);
+  printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
+  printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
+  printf("Window Size       : %u\n", ntohs(header.th_win));
+  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
+  printf("Urgent Pointer    : %u\n", ntohs(header.th_urp));
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
@@ -343,8 +349,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
   // 1. 패킷 파싱
   uint8_t flagsByte;
-  uint16_t srcport, destport, seqnum, acknum;
-  uint32_t srcip, destip;
+  uint16_t srcport, destport;
+  uint32_t srcip, destip, seqnum, acknum;
 
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
@@ -362,7 +368,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   bool fin = flagsByte & 0x01;
 
   //source dest 주소 바꾸고, ack 번호는 seq # +1로 세팅하고,seq 번호는 seq 변수에 1 더해서 ㄱㄱ
-  
+  if (ack){
+    TCP_state = ESTABLISHED_state;
+    printf("성공!");
+    global_backlog += 1;
+  }
   // 3. TCP 상태 전이 처리
   switch (TCP_state) {
     case (CLOSE_state):
@@ -373,11 +383,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
           //connect가 먼저 실행되었을 때 accept를 기다리는 부분. 따라서 connect 대기 큐에 넣기.
           connect_requests.emplace_back(fromModule, std::move(packet.clone()));
           break;
-        }
-        auto [syscallUUID, pid, addr, addrlen] = accept_requests.front();
+        }/*
+        auto [syscallUUID, pid, sockfd, addr, addrlen] = accept_requests.front();
         accept_requests.pop_front();
 
-        sendSYNACK(fromModule, std::move(packet));
+        sendSYNACK(fromModule, std::move(packet.clone()));
       
         struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
         client_addr->sin_family = AF_INET;
@@ -393,14 +403,22 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       
         // 새 소켓을 listen 상태로 설정
         listen_table[{pid, new_sockfd}] = 0;
+        global_backlog -= 1;
+
+        ipv4_t dest_ip;
+
+        packet.readData(30, &dest_ip, 4);
+        int port = getRoutingTable(dest_ip);
+
         bind_table[{pid, new_sockfd}] = {destip, destport};
       
-        this->returnSystemCall(syscallUUID, new_sockfd);
+        this->returnSystemCall(syscallUUID, new_sockfd);*/
       }
       break;
     case (SYN_RCVD_state):
       if (ack){
         TCP_state = ESTABLISHED_state;
+        global_backlog += 1;
       }
       break;
     case (SYN_SENT_state):

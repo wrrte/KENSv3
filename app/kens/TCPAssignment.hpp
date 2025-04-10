@@ -42,8 +42,10 @@ private:
 
   std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
   std::unordered_map<std::pair<int, int>, int> listen_table;
-  std::list<std::tuple<UUID, int, struct sockaddr *, socklen_t *>> accept_requests;
+  std::list<std::tuple<UUID, int, int, struct sockaddr *, socklen_t *>> accept_requests;
   std::list<std::pair<std::string, Packet>> connect_requests;
+
+  int global_backlog;
 
 public:
   TCPAssignment(Host &host);
