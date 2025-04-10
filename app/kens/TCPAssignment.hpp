@@ -40,8 +40,15 @@ private:
   uint64_t TCP_state;
   uint64_t seq;
 
-  std::unordered_map<std::pair<int, int>, std::pair<uint32_t, uint16_t>> bind_table;
-  std::unordered_map<std::pair<int, int>, int> listen_table;
+  struct SocketInfo {
+    uint32_t ip;
+    uint16_t port;
+    bool listen_state;
+    int backlog;
+    std::deque<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> syn_queue;
+  };
+
+  std::unordered_map<std::pair<int, int>, SocketInfo> bind_table;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> SYN_queue;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> accept_queue;
   std::unordered_map<std::pair<uint32_t, uint16_t>, UUID> SYNACK_queue;

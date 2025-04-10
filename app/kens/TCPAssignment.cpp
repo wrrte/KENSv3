@@ -26,7 +26,6 @@ void TCPAssignment::initialize() {
   TCP_state = CLOSE_state;
   seq = 123456;
   bind_table.clear();
-  listen_table.clear();
   accept_queue.clear();
   SYNACK_queue.clear();
 }
@@ -123,8 +122,8 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
 
   auto IPnPort = bind_table.find({pid, sockfd});
   if (IPnPort != bind_table.end()) {
-      uint32_t existing_ip = IPnPort->second.first;
-      uint16_t existing_port = IPnPort->second.second;
+      uint32_t existing_ip = IPnPort->second.ip;
+      uint16_t existing_port = IPnPort->second.port;
 
       if (existing_ip == ip_addr && existing_port == port) {
           this->returnSystemCall(syscallUUID, 0); // 이미 동일한 주소로 바인딩 → 성공
@@ -137,8 +136,8 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
 
   // 바인딩된 주소/포트 중복 확인
   for (const auto &[key, value] : bind_table) {
-      uint32_t bound_ip = value.first;
-      uint16_t bound_port = value.second;
+      uint32_t bound_ip = value.ip;
+      uint16_t bound_port = value.port;
 
       // 포트가 동일하고, IP가 동일하거나 INADDR_ANY(0.0.0.0)로 설정된 경우 충돌
       if (bound_port == port && (bound_ip == ip_addr || bound_ip == INADDR_ANY || ip_addr == INADDR_ANY)) {
@@ -148,7 +147,7 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   }
 
   // 바인딩 정보 저장
-  bind_table[{pid, sockfd}] = {ip_addr, port};
+  bind_table[{pid, sockfd}] = {ip_addr, port, false};
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -161,7 +160,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
   }
 
   // 이미 listen 상태인지 확인
-  if (listen_table.find({pid, sockfd}) != listen_table.end()) {
+  if (it->second.listen_state) {
       this->returnSystemCall(syscallUUID, 0); // 이미 listen 상태라면 성공
       return;
   }
@@ -172,7 +171,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 
   // 소켓을 listen 상태로 변경
   left_connect_place = backlog;
-  listen_table[{pid, sockfd}] = backlog;
+  it->second.backlog = backlog;
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -211,7 +210,7 @@ uint16_t TCPAssignment::allocateEphemeralPort() {
   for (uint16_t port = 49152; port <= 65535; ++port) {
       bool used = false;
       for (const auto& [key, value] : bind_table) {
-          if (value.second == port) {
+          if (value.port == port) {
               used = true;
               break;
           }
@@ -261,7 +260,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
     bind_table[{pid, sockfd}] = {srcip, header.th_sport};
   }
   else{
-    header.th_sport = bind_table[{pid, sockfd}].second;
+    header.th_sport = bind_table[{pid, sockfd}].port;
   }
 
   uint8_t tcp_segment[sizeof(tcphdr)];
@@ -324,8 +323,8 @@ void TCPAssignment::syscall_getsockname(UUID syscallUUID, int pid, int sockfd, s
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   sock_addr->sin_family = AF_INET;
-  sock_addr->sin_addr.s_addr = it->second.first;  // 저장된 IP 주소
-  sock_addr->sin_port = it->second.second;        // 저장된 포트 번호
+  sock_addr->sin_addr.s_addr = it->second.ip;  // 저장된 IP 주소
+  sock_addr->sin_port = it->second.port;        // 저장된 포트 번호
 
   // addrlen을 업데이트 (호출한 프로세스가 변경된 크기를 알도록)
   *addrlen = sizeof(struct sockaddr_in);
@@ -349,8 +348,8 @@ void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, s
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   sock_addr->sin_family = AF_INET;
-  sock_addr->sin_addr.s_addr = it->second.first;  // 저장된 IP 주소
-  sock_addr->sin_port = it->second.second;        // 저장된 포트 번호
+  sock_addr->sin_addr.s_addr = it->second.ip;  // 저장된 IP 주소
+  sock_addr->sin_port = it->second.port;        // 저장된 포트 번호
 
   // addrlen을 업데이트 (호출한 프로세스가 변경된 크기를 알도록)
   *addrlen = sizeof(struct sockaddr_in);
