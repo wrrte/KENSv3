@@ -276,40 +276,51 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
   printf("    SYN: %d\n", (header.th_flags & 0x02) != 0);
   printf("    FIN: %d\n", (header.th_flags & 0x01) != 0);
   printf("Window Size       : %u\n", ntohs(header.th_win));
-  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
-  printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
+  printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp)); 
 
+  printf("Checksum          : 0x%04x\n", ntohs(header.th_sum));
+  printf("~Checksum         : 0x%04x\n", ~ntohs(header.th_sum));
   uint32_t srcip, destip;
+  uint8_t tcp_segment[sizeof(tcphdr)];
+
+  packet.readData(34, tcp_segment, packet.getSize()-34);
+  printf("origin total      : 0x%04x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
   
+  header.th_sum = 0;
+  packet.writeData(34, &header, sizeof(tcphdr));
+
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("My Checksum       : 0x%04x\n", NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr)));
+  printf("My one_sum        : 0x%04x\n\n\n", NetworkUtil::one_sum(tcp_segment, sizeof(tcphdr)));
+
+  /*
+  
+
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
-  
+
   uint8_t tcp_segment[sizeof(tcphdr)];
-  
-  packet.readData(34, tcp_segment, sizeof(tcphdr));
-  
+
+  packet.readData(34, tcp_segment, packet.getSize()-34);
+
   //받은 패킷의 checksum 바로 출력
   printf("origin result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
-  
+
   //(flag, acknum handling)
-  
+
   //checksum field를 0으로 두고 계산
   header.th_sum = 0;
   packet.writeData(34, &header, sizeof(tcphdr));
-  memset(tcp_segment, 0, sizeof(tcp_segment));
+
   packet.readData(34, tcp_segment, sizeof(tcphdr));
 
-  printf("%02x %02x\n", tcp_segment[16], tcp_segment[17]);
-
-  //이거 함수가 잘못된 것 같긴 함. 1의 보수인지 0의 보수인지 취해야 할 것 같달까.
-  header.th_sum = ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr)));
-
-  printf("%x\n", header.th_sum);
+  header.th_sum = htons(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr)));
   packet.writeData(34, &header, sizeof(tcphdr));
-  memset(tcp_segment, 0, sizeof(tcp_segment));
+
   packet.readData(34, tcp_segment, sizeof(tcphdr));
   //보낼 패킷의 checksum 출력
-  printf("after : 0x%x\n\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
+  printf("after : 0x%x\n", ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))));
+  */
   
   /*
   ipv4_t dest_ip;
