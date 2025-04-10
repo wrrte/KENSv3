@@ -46,6 +46,8 @@ private:
     bool listen_state;
     int left_connect_place;
     std::deque<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> syn_queue;
+    std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> accept_queue;
+    std::unordered_map<std::pair<int, int>, std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
