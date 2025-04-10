@@ -1,9 +1,9 @@
 /*
- * E_NetworkUtil.cpp
- *
- *  Created on: 2014. 11. 20.
- *      Author: Keunhong Lee
- */
+* E_NetworkUtil.cpp
+*
+*  Created on: 2014. 11. 20.
+*      Author: Keunhong Lee
+*/
 
 #include <E/Networking/E_NetworkUtil.hpp>
 #include <arpa/inet.h>

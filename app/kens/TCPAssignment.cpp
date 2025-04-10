@@ -285,12 +285,33 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
   packet.readData(30, &destip, 4);
   
   uint8_t tcp_segment[sizeof(tcphdr)];
+
+  unsigned short chksum = header.th_sum;
   
   packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin1 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
   
-  //받은 패킷의 checksum 바로 출력
-  printf("origin result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin2 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
   
+  header.th_sum = 0;
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin3 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  
+  packet.writeData(34, &header, sizeof(tcphdr));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin4 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  
+  header.th_sum = chksum;
+  packet.writeData(34, &header, sizeof(tcphdr));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin5 result : 0x%x\n", ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  
+  header.th_sum = 0;
+  packet.writeData(34, &header, sizeof(tcphdr));
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
+  printf("origin6 result : 0x%x\n", ~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, sizeof(tcphdr))));
+  printf("origin cheksum : 0x%x\n", chksum);
   //(flag, acknum handling)
   
   //checksum field를 0으로 두고 계산
@@ -302,7 +323,7 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
   printf("%02x %02x\n", tcp_segment[16], tcp_segment[17]);
 
   //이거 함수가 잘못된 것 같긴 함. 1의 보수인지 0의 보수인지 취해야 할 것 같달까.
-  header.th_sum = ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr)));
+  header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
 
   printf("%x\n", header.th_sum);
   packet.writeData(34, &header, sizeof(tcphdr));
