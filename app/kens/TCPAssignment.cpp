@@ -301,6 +301,7 @@ void TCPAssignment::sendSYNACK(std::string fromModule, Packet &&packet) {
 
   printf("%02x %02x\n", tcp_segment[16], tcp_segment[17]);
 
+  //이거 함수가 잘못된 것 같긴 함. 1의 보수인지 0의 보수인지 취해야 할 것 같달까.
   header.th_sum = ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr)));
 
   printf("%x\n", header.th_sum);
