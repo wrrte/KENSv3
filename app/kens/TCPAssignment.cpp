@@ -303,7 +303,6 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   printf("Urgent Pointer    : %u\n\n", ntohs(header.th_urp));   
 */
   SYNACK_queue[{destip, header.th_dport}] = syscallUUID;
-  //printf("%u %u\n", destip, ntohs(header.th_dport));
 
   this->returnSystemCall(syscallUUID, 0);
 
