@@ -340,7 +340,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
           return;
         }
         auto [syscallUUID, pid, sockfd, addr, addrlen] = accept_requests.front();
-        accept_queue.pop_front();
+        accept_requests.pop_front();
       
         struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
         client_addr->sin_family = AF_INET;
