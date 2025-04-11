@@ -228,10 +228,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   struct sockaddr_in *server_addr = reinterpret_cast<struct sockaddr_in *>(addr);
 
-  printf("connect : %d %d %u\n", pid, sockfd, Socket.ip);
-  if(Socket.SimultaneousConnect){
-    printf("일단 connect에서 멈추긴함\n\n\n");
-  }
+  //printf("connect : %d %d %u\n", pid, sockfd, Socket.ip);
 
   Packet packet (54);
   tcphdr header;
@@ -278,7 +275,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   sock_table[{pid, sockfd}].peerport = header.th_dport;
 
   sendPacket("IPv4", std::move(packet));
-  printf("sent syn\n");
+  //printf("sent syn\n");
 
   SYNACK_queue[{destip, header.th_dport}] = syscallUUID;
 

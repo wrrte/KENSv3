@@ -51,8 +51,6 @@ private:
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
-    bool SimultaneousConnect;
-    std::list<std::pair<uint32_t, uint16_t>> SC_queue;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
