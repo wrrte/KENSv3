@@ -220,10 +220,34 @@ uint16_t TCPAssignment::allocateEphemeralPort() {
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
 
-  Packet packet (54);
-  tcphdr header;
+  // connect syscall 내부에 추가
+  SocketInfo& Socket = sock_table[{pid, sockfd}];
 
   struct sockaddr_in *server_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+
+  // check if a SYN from peer already exists (simultaneous connect)
+  for (const auto& [key, info] : sock_table) {
+    for (const auto& syn : info.syn_queue) {
+        auto [srcip_syn, destip_syn, sport_syn, dport_syn] = syn;
+        if (srcip_syn == server_addr->sin_addr.s_addr && destip_syn == info.ip &&
+            sport_syn == server_addr->sin_port && dport_syn == info.port) {
+              
+              printf("asdfjaklsdfjaksdl;fj;asldfjdsa\n\n\n");
+
+            // 내 소켓 상태에 상대 정보 등록
+            Socket.ip = 0x12345678;
+            Socket.port = 0x12345678;
+
+            // 바로 ACK 응답이 올 테니 connect는 성공으로 처리
+            this->returnSystemCall(syscallUUID, 0);
+            return;
+        }
+    }
+  }
+
+
+  Packet packet (54);
+  tcphdr header;
 
   uint32_t srcip, destip = server_addr->sin_addr.s_addr;
   header.th_dport = server_addr->sin_port;
@@ -263,7 +287,8 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   packet.writeData(34, &header, sizeof(tcphdr));
   packet.readData(34, tcp_segment, sizeof(tcphdr));
 
-  sock_table[{pid, sockfd}] = {destip, header.th_dport};
+  sock_table[{pid, sockfd}].peerip = destip;
+  sock_table[{pid, sockfd}].peerport = header.th_dport;
 
   sendPacket("IPv4", std::move(packet));
 
@@ -314,8 +339,8 @@ void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, s
 
   struct sockaddr_in *sock_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   sock_addr->sin_family = AF_INET;
-  sock_addr->sin_addr.s_addr = it->second.ip;  // 저장된 IP 주소
-  sock_addr->sin_port = it->second.port;        // 저장된 포트 번호
+  sock_addr->sin_addr.s_addr = it->second.peerip;  // 저장된 IP 주소
+  sock_addr->sin_port = it->second.peerport;        // 저장된 포트 번호
 
   // addrlen을 업데이트 (호출한 프로세스가 변경된 크기를 알도록)
   *addrlen = sizeof(struct sockaddr_in);
@@ -351,18 +376,25 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     int pid, sockfd;
 
     for (auto& [key, info] : sock_table) {
-      if (info.ip == destip && info.port == header.th_dport && info.listen_state == true) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
         pid = key.first;
         sockfd = key.second;
         Socket = &info;
+        printf("222222222222222222222222222222222222\n\n\n");
         break;
       }
     }
     if (Socket == nullptr) {
       for (auto& [key, info] : sock_table) {
-        if (info.ip == 0 && info.port == header.th_dport) {
+        printf("qwerqwer : %u %u\n", destip, header.th_dport);
+        if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
           Socket = &info;
-          break;
+          pid = key.first;
+          sockfd = key.second;
+          Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
+          Socket->left_connect_place--;
+          printf("11111121111111111111111111\n\n\n");
+          return;
         }
       }
     }
@@ -371,8 +403,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     }
 
     if(Socket->left_connect_place <= 0){
-      if(destip == 117483712){
-      }
       return;
     }
     
@@ -425,6 +455,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (ack && !syn){
 
+    printf("ack got\n\n");
 
     SocketInfo* Socket = nullptr;
 
@@ -438,10 +469,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         break;
       }
     }
-    if (Socket == nullptr){
+    if (Socket == nullptr) {
       for (auto& [key, info] : sock_table) {
         if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
-          Socket = &info;
+          Socket = &info;        
           pid = key.first;
           sockfd = key.second;
           break;
