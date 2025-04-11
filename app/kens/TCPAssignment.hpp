@@ -51,6 +51,8 @@ private:
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
+    bool SimultaneousConnect;
+    std::list<std::pair<uint32_t, uint16_t>> SC_queue;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
@@ -70,7 +72,7 @@ public:
 protected:
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
-  void syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol);
+  void syscall_socket(UUID syscallUUID, int pid, int domain, int type);
   void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog);
   void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
   void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen);

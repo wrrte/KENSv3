@@ -41,7 +41,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
   switch (param.syscallNumber) {
   case SOCKET:
     this->syscall_socket(syscallUUID, pid, std::get<int>(param.params[0]),
-                        std::get<int>(param.params[1]), std::get<int>(param.params[2]));
+                        std::get<int>(param.params[1]));
     break;
   case CLOSE:
     this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
@@ -95,7 +95,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
   }
 }
 
-void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type, int protocol) {
+void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type) {
   //assert(false);
   int fd = this->createFileDescriptor(pid);
   this->returnSystemCall(syscallUUID, fd);
@@ -147,6 +147,8 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
 
   // 바인딩 정보 저장
   sock_table[{pid, sockfd}] = {ip_addr, port, false};
+  sock_table[{pid, sockfd}].backlog = 1;
+  sock_table[{pid, sockfd}].left_connect_place = 1;
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -189,6 +191,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
   client_addr->sin_family = AF_INET;
   client_addr->sin_addr.s_addr = destip;
+  client_addr->sin_addr.s_addr = destip;
   client_addr->sin_port = destport;
 
   // 새로운 소켓 파일 디스크립터 할당
@@ -225,26 +228,10 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   struct sockaddr_in *server_addr = reinterpret_cast<struct sockaddr_in *>(addr);
 
-  // check if a SYN from peer already exists (simultaneous connect)
-  for (const auto& [key, info] : sock_table) {
-    for (const auto& syn : info.syn_queue) {
-        auto [srcip_syn, destip_syn, sport_syn, dport_syn] = syn;
-        if (srcip_syn == server_addr->sin_addr.s_addr && destip_syn == info.ip &&
-            sport_syn == server_addr->sin_port && dport_syn == info.port) {
-              
-              printf("asdfjaklsdfjaksdl;fj;asldfjdsa\n\n\n");
-
-            // 내 소켓 상태에 상대 정보 등록
-            Socket.ip = 0x12345678;
-            Socket.port = 0x12345678;
-
-            // 바로 ACK 응답이 올 테니 connect는 성공으로 처리
-            this->returnSystemCall(syscallUUID, 0);
-            return;
-        }
-    }
+  printf("connect : %d %d %u\n", pid, sockfd, Socket.ip);
+  if(Socket.SimultaneousConnect){
+    printf("일단 connect에서 멈추긴함\n\n\n");
   }
-
 
   Packet packet (54);
   tcphdr header;
@@ -291,10 +278,9 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   sock_table[{pid, sockfd}].peerport = header.th_dport;
 
   sendPacket("IPv4", std::move(packet));
+  printf("sent syn\n");
 
   SYNACK_queue[{destip, header.th_dport}] = syscallUUID;
-
-  this->returnSystemCall(syscallUUID, 0);
 
 }
 
@@ -371,30 +357,33 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (syn && !ack){
 
-
     SocketInfo* Socket = nullptr;
     int pid, sockfd;
+    UUID syscallUUID;
 
     for (auto& [key, info] : sock_table) {
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
         pid = key.first;
         sockfd = key.second;
         Socket = &info;
-        printf("222222222222222222222222222222222222\n\n\n");
         break;
       }
     }
     if (Socket == nullptr) {
       for (auto& [key, info] : sock_table) {
-        printf("qwerqwer : %u %u\n", destip, header.th_dport);
         if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
           Socket = &info;
           pid = key.first;
           sockfd = key.second;
-          Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
-          Socket->left_connect_place--;
-          printf("11111121111111111111111111\n\n\n");
-          return;
+          auto it = SYNACK_queue.find({srcip, header.th_sport});
+          if (it == SYNACK_queue.end()) {
+            return;
+          }
+          syscallUUID = it->second;
+          Socket->peerip = srcip;
+          Socket->peerport = header.th_sport;
+          this->returnSystemCall(syscallUUID, 0);
+          break;
         }
       }
     }
@@ -405,7 +394,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     if(Socket->left_connect_place <= 0){
       return;
     }
-    
     Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
 
@@ -437,7 +425,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     std::swap(header.th_sport, header.th_dport);
     header.th_ack = htonl(ntohl(header.th_seq) +1);
-    header.th_flags |= 0x12; //synack
+    header.th_flags = 0x12; //synack
 
     header.th_sum = 0;
     reply.writeData(34, &header, sizeof(tcphdr));
@@ -455,7 +443,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (ack && !syn){
 
-    printf("ack got\n\n");
+    //printf("gotack\n");
 
     SocketInfo* Socket = nullptr;
 
@@ -521,7 +509,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     if (it == SYNACK_queue.end()) {
       return;
     }
-    
     UUID syscallUUID = it->second;
 
     tcphdr header;

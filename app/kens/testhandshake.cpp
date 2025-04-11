@@ -662,6 +662,8 @@ protected:
     addr.sin_addr.s_addr = inet_addr(env["CONNECT_ADDR"].c_str());
     addr.sin_port = htons(atoi(env["CONNECT_PORT"].c_str()));
 
+    printf("my IP : %u, my port : %u\n", bind_addr.sin_addr.s_addr, bind_addr.sin_port);
+    printf("peer IP : %u, peer port : %u\n", addr.sin_addr.s_addr, addr.sin_port);
     ret = connect(client_socket, (struct sockaddr *)&addr, len);
     EXPECT_EQ(ret, 0);
 
@@ -679,6 +681,7 @@ protected:
     EXPECT_EQ(bind_addr.sin_addr.s_addr, temp_addr.sin_addr.s_addr);
     EXPECT_EQ(bind_addr.sin_family, temp_addr.sin_family);
     EXPECT_EQ(bind_addr.sin_port, temp_addr.sin_port);
+    printf("IP : %u\n", bind_addr.sin_addr.s_addr);
 
     close(client_socket);
     return 0;
