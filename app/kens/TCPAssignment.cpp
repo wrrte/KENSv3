@@ -47,14 +47,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
     break;
   case READ:
-    // this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                    std::get<void *>(param.params[1]),
-    //                    std::get<int>(param.params[2]));
+    this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
+                       std::get<void *>(param.params[1]),
+                       std::get<int>(param.params[2]));
     break;
   case WRITE:
-    // this->syscall_write(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                     std::get<void *>(param.params[1]),
-    //                     std::get<int>(param.params[2]));
+    this->syscall_write(syscallUUID, pid, std::get<int>(param.params[0]),
+                        std::get<void *>(param.params[1]),
+                        std::get<int>(param.params[2]));
     break;
   case CONNECT:
     this->syscall_connect(
@@ -93,6 +93,27 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
   default:
     assert(0);
   }
+}
+
+void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
+  
+  if (sock_table[{pid, sockfd}].read_queue.empty()){
+    sock_table[{pid, sockfd}].read_requests.emplace_back(syscallUUID, &buf, count);
+    return;
+  }
+
+  Packet packet = sock_table[{pid, sockfd}].read_queue.front();
+  sock_table[{pid, sockfd}].read_queue.pop_front();
+
+  //packet.readData(54, &buf, count); 
+
+  //this->returnSystemCall(syscallUUID, count);
+}
+
+void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
+
+  //this->returnSystemCall(syscallUUID, count);
+
 }
 
 void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type) {
@@ -351,7 +372,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   bool ack = header.th_flags & TH_ACK;
   bool fin = header.th_flags & TH_FIN;
 
-
   if (syn && !ack){
 
     SocketInfo* Socket = nullptr;
@@ -545,6 +565,44 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     this->returnSystemCall(syscallUUID, 0);
   }
+
+  SocketInfo* Socket = nullptr;
+  int pid, sockfd;
+
+  for (auto& [key, info] : sock_table) {
+    if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
+      pid = key.first;
+      sockfd = key.second;
+      Socket = &info;
+      break;
+    }
+  }
+  if (Socket == nullptr) {
+    for (auto& [key, info] : sock_table) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+        Socket = &info;
+        pid = key.first;
+        sockfd = key.second;
+        break;
+      }
+    }
+  }
+  if (Socket == nullptr){
+    return;
+  }
+
+  if(sock_table[{pid, sockfd}].read_requests.empty()){
+    sock_table[{pid, sockfd}].read_queue.emplace_back(packet.clone());
+    return;
+  }
+
+  auto [syscallUUID, buf, count] = sock_table[{pid, sockfd}].read_requests.front();
+  sock_table[{pid, sockfd}].read_requests.pop_front();
+
+  //packet.readData(54, &buf, count); 
+
+  //this->returnSystemCall(syscallUUID, count);
+
 }
 
 void TCPAssignment::timerCallback(std::any payload) {

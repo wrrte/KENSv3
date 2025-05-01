@@ -48,6 +48,8 @@ private:
     std::deque<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> syn_queue;
     std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> accept_queue;
     std::unordered_map<std::pair<int, int>, std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
+    std::list<Packet> read_queue;
+    std::list<std::tuple<UUID, void *, size_t>> read_requests;
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
@@ -70,6 +72,10 @@ public:
 protected:
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
+
+  void syscall_read(UUID syscallUUID, int pid, int fd, void *buf, size_t count);
+  void syscall_write(UUID syscallUUID, int pid, int fd, void *buf, size_t count);
+                            
   void syscall_socket(UUID syscallUUID, int pid, int domain, int type);
   void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog);
   void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t *addrlen);
