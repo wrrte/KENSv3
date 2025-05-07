@@ -28,6 +28,8 @@
 #define FIN_WAIT_2_state 9
 #define TIME_WAIT_state 10
 
+#define SEND_BUFFER_SIZE 4096
+
 namespace E {
 
 class TCPAssignment : public HostModule,
@@ -53,6 +55,12 @@ private:
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
+    bool connected;
+    uint8_t send_buffer[SEND_BUFFER_SIZE];
+    int ack_num;
+    int seq_num;
+    int data_num;
+    int rwnd;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;

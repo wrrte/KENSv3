@@ -96,8 +96,9 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
 }
 
 void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
-  
+
   if (sock_table[{pid, sockfd}].read_queue.empty()){
+    //std::cout << "read first" << std::endl;
     sock_table[{pid, sockfd}].read_requests.emplace_back(syscallUUID, &buf, count);
     return;
   }
@@ -105,15 +106,69 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *bu
   Packet packet = sock_table[{pid, sockfd}].read_queue.front();
   sock_table[{pid, sockfd}].read_queue.pop_front();
 
-  //packet.readData(54, &buf, count); 
+  uint8_t *buffer = reinterpret_cast<uint8_t *>(buf);
 
-  //this->returnSystemCall(syscallUUID, count);
+  packet.readData(54, buf, (count<512) ? count : 512); 
+
+  std::cout << buffer << std::endl;
+  std::cout << ((count<512) ? count : 512)  << std::endl;
+
+
+  this->returnSystemCall(syscallUUID, (count<512) ? count : 512);
 }
 
 void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
 
-  //this->returnSystemCall(syscallUUID, count);
+  struct SocketInfo sock = sock_table[{pid, sockfd}];
 
+  int packet_num = 1+(count-1)/512;
+  uint8_t tcp_segment[sizeof(tcphdr)];
+  ipv4_t dest_ip;
+
+  if(sock.data_num + packet_num <= SEND_BUFFER_SIZE){
+    //printf("%d %d %d %d\n", sock.seq_num, sock.ack_num, packet_num, sock.rwnd);
+    if(sock.seq_num-sock.ack_num + packet_num <= sock.rwnd){
+      //printf("\n\nbbuyo\n\n\n");
+      tcphdr header;
+      header.th_dport = sock.peerport;
+      header.th_sport = sock.port;
+      int remaining = count;
+      for(int i = 0; i < packet_num; i++){
+        int write_size = (remaining<512)?remaining:512;
+        Packet packet(write_size+54);
+        packet.writeData(30, &sock.peerip, 4);
+        packet.readData(30, &dest_ip, 4);
+        int port = getRoutingTable(dest_ip);
+        std::optional<ipv4_t> src_IP = getIPAddr(port);
+        ipv4_t src_ip = src_IP.value();
+        packet.writeData(26, &src_ip, 4);
+
+        printf("%d.%d.%d.%d %d.%d.%d.%d %d %d\n", src_ip[0], src_ip[1], src_ip[2], src_ip[3], dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_sport, header.th_dport);
+    
+        header.th_seq = sock.seq_num;
+        header.th_sum = 0;
+        packet.writeData(34, &header, sizeof(tcphdr));
+        packet.readData(34, tcp_segment, sizeof(tcphdr));
+        header.th_sum = (~ntohs(NetworkUtil::tcp_sum(sock.ip, sock.peerip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+        packet.writeData(34, &header, sizeof(tcphdr));
+        packet.writeData(54, (uint8_t *)buf + i*512, write_size);
+        sendPacket("IPv4", std::move(packet));
+        sock.seq_num++;
+        sock.data_num++;
+        remaining -= write_size;
+      }
+      this->returnSystemCall(syscallUUID, count);
+    }
+    else{
+      printf("\n\nohno\n\n\n");
+      memcpy(sock.send_buffer + sock.seq_num-sock.ack_num, buf, count);
+      sock.data_num += packet_num; //올림
+      this->returnSystemCall(syscallUUID, count);
+    }
+  }
+  else{
+
+  }
 }
 
 void TCPAssignment::syscall_socket(UUID syscallUUID, int pid, int domain, int type) {
@@ -170,6 +225,8 @@ void TCPAssignment::syscall_bind(UUID syscallUUID, int pid, int sockfd, struct s
   sock_table[{pid, sockfd}] = {ip_addr, port, false};
   sock_table[{pid, sockfd}].backlog = 1;
   sock_table[{pid, sockfd}].left_connect_place = 1;
+  sock_table[{pid, sockfd}].connected = false;
+  sock_table[{pid, sockfd}].rwnd = 1024;
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -224,6 +281,8 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 
   sock_table[{pid, new_sockfd}] = {destip, destport, false, 0, {}};
 
+  sock_table[{pid, sockfd}].connected = true;
+
   this->returnSystemCall(syscallUUID, new_sockfd);
 
 }
@@ -246,6 +305,8 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   // connect syscall 내부에 추가
   SocketInfo& Socket = sock_table[{pid, sockfd}];
+
+  Socket.rwnd = 15;
 
   struct sockaddr_in *server_addr = reinterpret_cast<struct sockaddr_in *>(addr);
 
@@ -372,41 +433,96 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   bool ack = header.th_flags & TH_ACK;
   bool fin = header.th_flags & TH_FIN;
 
-  if (syn && !ack){
+  SocketInfo* Socket = nullptr;
+  int pid, sockfd;
 
-    SocketInfo* Socket = nullptr;
-    int pid, sockfd;
-    UUID syscallUUID;
-
+  for (auto& [key, info] : sock_table) {
+    if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
+      pid = key.first;
+      sockfd = key.second;
+      Socket = &info;
+      break;
+    }
+  }
+  if (Socket == nullptr) {
     for (auto& [key, info] : sock_table) {
-      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
+      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
+        Socket = &info;
         pid = key.first;
         sockfd = key.second;
-        Socket = &info;
-        break;
-      }
-    }
-    if (Socket == nullptr) {
-      for (auto& [key, info] : sock_table) {
-        if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
-          Socket = &info;
-          pid = key.first;
-          sockfd = key.second;
+        if(syn && !ack && !Socket->connected){
           auto it = SYNACK_queue.find({srcip, header.th_sport});
           if (it == SYNACK_queue.end()) {
             return;
           }
-          syscallUUID = it->second;
+          UUID syscallUUID = it->second;
           Socket->peerip = srcip;
           Socket->peerport = header.th_sport;
           this->returnSystemCall(syscallUUID, 0);
-          break;
         }
+        break;
       }
     }
-    if (Socket == nullptr){
+  }
+  if (Socket == nullptr){
+    return;
+  }
+
+  if (Socket->connected){
+
+
+    printf("ackgot\n");
+
+    if(sock_table[{pid, sockfd}].read_requests.empty()){
+      //std::cout << "packet first" << std::endl;
+      sock_table[{pid, sockfd}].read_queue.emplace_back(packet.clone());
       return;
     }
+    
+    auto [syscallUUID, buf, count] = sock_table[{pid, sockfd}].read_requests.front();
+    sock_table[{pid, sockfd}].read_requests.pop_front();
+
+    packet.readData(54, buf, (count<512) ? count : 512);
+
+
+    uint32_t srcip, destip;
+
+    packet.readData(26, &srcip, 4);
+    packet.readData(30, &destip, 4);
+
+    Packet reply = packet.clone();
+    
+    uint8_t tcp_segment[sizeof(tcphdr)];
+
+    ipv4_t dest_ip;
+    packet.readData(26, &dest_ip, 4);
+    int port = getRoutingTable(dest_ip);
+    std::optional<ipv4_t> src_IP = getIPAddr(port);
+    ipv4_t src_ip = src_IP.value();
+    reply.writeData(26, &src_ip, 4);
+    reply.writeData(30, &dest_ip, 4);
+
+    std::swap(header.th_sport, header.th_dport);
+    header.th_ack = htonl(ntohl(header.th_seq) +1);
+    header.th_flags = 0x10; //ack
+
+    header.th_sum = 0;
+    reply.writeData(34, &header, sizeof(tcphdr));
+    reply.readData(34, tcp_segment, sizeof(tcphdr));
+
+    header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+
+    reply.writeData(34, &header, sizeof(tcphdr));
+    reply.readData(34, tcp_segment, sizeof(tcphdr));
+
+    sendPacket(fromModule, std::move(reply));
+  
+    this->returnSystemCall(syscallUUID, (count<512) ? count : 512);
+
+    return;
+  }
+
+  if (syn && !ack){
 
     if(Socket->left_connect_place <= 0){
       return;
@@ -513,11 +629,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         }
       
         sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
+        
+        Socket->connected = true;
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
       }
     }
+    return;
   }
 
   if (syn && ack){
@@ -527,9 +646,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
     UUID syscallUUID = it->second;
-
-    tcphdr header;
-    packet.readData(34, &header, sizeof(tcphdr));
 
     uint32_t srcip, destip;
 
@@ -549,6 +665,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     reply.writeData(30, &dest_ip, 4);
 
     std::swap(header.th_sport, header.th_dport);
+
+    //printf("%d.%d.%d.%d %d.%d.%d.%d %d %d is real\n", src_ip[0], src_ip[1], src_ip[2], src_ip[3], dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_sport, header.th_dport);
+    
     header.th_ack = htonl(ntohl(header.th_seq) +1);
     header.th_flags = 0x10; //ack
 
@@ -563,45 +682,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     sendPacket(fromModule, std::move(reply));
 
+    Socket->connected = true;
+
     this->returnSystemCall(syscallUUID, 0);
-  }
 
-  SocketInfo* Socket = nullptr;
-  int pid, sockfd;
-
-  for (auto& [key, info] : sock_table) {
-    if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
-      pid = key.first;
-      sockfd = key.second;
-      Socket = &info;
-      break;
-    }
-  }
-  if (Socket == nullptr) {
-    for (auto& [key, info] : sock_table) {
-      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
-        Socket = &info;
-        pid = key.first;
-        sockfd = key.second;
-        break;
-      }
-    }
-  }
-  if (Socket == nullptr){
     return;
   }
 
-  if(sock_table[{pid, sockfd}].read_requests.empty()){
-    sock_table[{pid, sockfd}].read_queue.emplace_back(packet.clone());
-    return;
-  }
 
-  auto [syscallUUID, buf, count] = sock_table[{pid, sockfd}].read_requests.front();
-  sock_table[{pid, sockfd}].read_requests.pop_front();
-
-  //packet.readData(54, &buf, count); 
-
-  //this->returnSystemCall(syscallUUID, count);
 
 }
 
