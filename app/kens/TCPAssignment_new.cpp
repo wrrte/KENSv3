@@ -454,6 +454,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         pid = key.first;
         sockfd = key.second;
         if(syn && !ack && !Socket->connected){
+          printf("\nsynack executed\n\n");
           auto it = SYNACK_queue.find({srcip, header.th_sport});
           if (it == SYNACK_queue.end()) {
             return;
@@ -471,8 +472,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     return;
   }
 
-  if (Socket->connected){
-
+  if (Socket->connected && !(syn || ack)){
+    
     if(sock_table[{pid, sockfd}].read_requests.empty()){
       //std::cout << "packet first" << std::endl;
       sock_table[{pid, sockfd}].read_queue.emplace_back(packet.clone());
@@ -530,14 +531,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
 
-    tcphdr header;
-    packet.readData(34, &header, sizeof(tcphdr));
-
-    uint32_t srcip, destip;
-
-    packet.readData(26, &srcip, 4);
-    packet.readData(30, &destip, 4);
-
     Packet reply = packet.clone();
     
     uint8_t tcp_segment[sizeof(tcphdr)];
@@ -575,34 +568,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   }
 
   if (ack && !syn){
-
-    //printf("gotack\n");
-
-    SocketInfo* Socket = nullptr;
-
-    int pid, sockfd;
-
-    for (auto& [key, info] : sock_table) {
-      if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
-        Socket = &info;
-        pid = key.first;
-        sockfd = key.second;
-        break;
-      }
-    }
-    if (Socket == nullptr) {
-      for (auto& [key, info] : sock_table) {
-        if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
-          Socket = &info;        
-          pid = key.first;
-          sockfd = key.second;
-          break;
-        }
-      }
-    }
-    if (Socket == nullptr){
-      return;
-    }
     
     for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
       if (*it == std::make_tuple(srcip, destip, header.th_sport, header.th_dport)) {
