@@ -100,90 +100,97 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *bu
 
   //printf("read\n");
 
-  if (sock_table[{pid, sockfd}].read_queue.empty()){
-    sock_table[{pid, sockfd}].read_requests.emplace_back(syscallUUID, buf, count);
+  SocketInfo& sock = sock_table[{pid, sockfd}];
+
+  if (sock.recv_len==0){
+    sock.read_requests.emplace_back(syscallUUID, buf, count);
     return;
   }
 
   printf("read last\n");
 
-  Packet packet = sock_table[{pid, sockfd}].read_queue.front();
-  sock_table[{pid, sockfd}].read_queue.pop_front();
+  memcpy(buf, sock.recv_buffer, count);
 
-  uint8_t *buffer = reinterpret_cast<uint8_t *>(buf);
+  memmove(sock.recv_buffer, sock.recv_buffer + count, sock.recv_len - count);
 
-  packet.readData(54, buf, (count<512) ? count : 512); 
+  sock.recv_len -= count;
 
-  std::cout << buffer << std::endl;
-  std::cout << ((count<512) ? count : 512)  << std::endl;
+  sock.nextseqnum+=count;
 
+  if(sock.recv_len<=0){
+    uint8_t tcp_segment[sizeof(tcphdr)];
+    ipv4_t dest_ip;
+    tcphdr header;
+    header.th_dport = sock.peerport;
+    header.th_sport = sock.port;
+    Packet packet(54);
+    packet.writeData(30, &sock.peerip, 4);
+    packet.readData(30, &dest_ip, 4);
+    int port = getRoutingTable(dest_ip);
+    std::optional<ipv4_t> src_IP = getIPAddr(port);
+    ipv4_t src_ip = src_IP.value();
+    packet.writeData(26, &src_ip, 4);
+    header.th_win = 200;
+    header.th_off = 5;
+    header.th_flags = TH_ACK;
+    header.th_ack = htonl(sock.nextseqnum);
+    header.th_sum = 0;
+    packet.writeData(34, &header, sizeof(tcphdr));
+    packet.readData(34, tcp_segment, sizeof(tcphdr));
+    header.th_sum = (~ntohs(NetworkUtil::tcp_sum(sock.ip, sock.peerip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+    packet.writeData(34, &header, sizeof(tcphdr));
+    sendPacket("IPv4", std::move(packet));
+  }
 
-  this->returnSystemCall(syscallUUID, (count<512) ? count : 512);
+  this->returnSystemCall(syscallUUID, count);
 }
 
 void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
 
   SocketInfo& sock = sock_table[{pid, sockfd}];
 
-  int packet_num = 1+(count-1)/512;
   uint8_t tcp_segment[sizeof(tcphdr)];
   ipv4_t dest_ip;
 
-  /*
-  if(!stop){
-    unsigned char *bytes = (unsigned char *)buf;
+  uint16_t m = (512<count)?512:count;
+  uint16_t write_size = (m<(sock.rwnd-sock.nextseqnum+sock.send_base))?m:(sock.rwnd-sock.nextseqnum+sock.send_base);
 
-    for (int i = 0; i < count; ++i) {
-        printf("%02x ", bytes[i]);  // 2자리 16진수로 출력
-    }
-    printf("\n");
-    stop = true;
-  }
-    */
+  if(sock.nextseqnum-sock.send_base < sock.rwnd){
 
-  //if(sock.data_num + packet_num <= SEND_BUFFER_SIZE){
-  if(sock.nextseqnum-sock.send_base + packet_num <= sock.rwnd){
     tcphdr header;
     header.th_dport = sock.peerport;
     header.th_sport = sock.port;
-    int remaining = count;
-    for(int i = 0; i < packet_num; i++){
 
-      //printf("%u %u %u %u %x\n", sock.nextseqnum, sock.send_base, packet_num, sock.rwnd, *((uint8_t *)buf+i*512));
+    
+    Packet packet(write_size+54);
+    packet.writeData(30, &sock.peerip, 4);
+    packet.readData(30, &dest_ip, 4);
+    int port = getRoutingTable(dest_ip);
+    std::optional<ipv4_t> src_IP = getIPAddr(port);
+    ipv4_t src_ip = src_IP.value();
+    packet.writeData(26, &src_ip, 4);
 
+    //printf("%d.%d.%d.%d %d.%d.%d.%d %d %d\n", src_ip[0], src_ip[1], src_ip[2], src_ip[3], dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_sport, header.th_dport);
 
-      int write_size = (remaining<512)?remaining:512;
-      Packet packet(write_size+54);
-      packet.writeData(30, &sock.peerip, 4);
-      packet.readData(30, &dest_ip, 4);
-      int port = getRoutingTable(dest_ip);
-      std::optional<ipv4_t> src_IP = getIPAddr(port);
-      ipv4_t src_ip = src_IP.value();
-      packet.writeData(26, &src_ip, 4);
+    header.th_seq = htonl(sock.nextseqnum);
+    sock.nextseqnum += write_size;
+    //printf("write seq# : %u\n", htonl(header.th_seq));
+    header.th_win = 200;
+    header.th_off = 5;
+    header.th_flags = TH_ACK;
+    header.th_ack = htonl(sock.peer_seq_num+1);
+    header.th_sum = 0;
+    packet.writeData(34, &header, sizeof(tcphdr));
+    packet.readData(34, tcp_segment, sizeof(tcphdr));
+    header.th_sum = (~ntohs(NetworkUtil::tcp_sum(sock.ip, sock.peerip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+    packet.writeData(34, &header, sizeof(tcphdr));
+    packet.writeData(54, buf, write_size);
+    sendPacket("IPv4", std::move(packet));
 
-      //printf("%d.%d.%d.%d %d.%d.%d.%d %d %d\n", src_ip[0], src_ip[1], src_ip[2], src_ip[3], dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_sport, header.th_dport);
-  
-      header.th_seq = htonl(sock.nextseqnum++);
-      //printf("write seq# : %u\n", htonl(header.th_seq));
-      header.th_off = 5;
-      header.th_flags = TH_ACK;
-      header.th_ack = htonl(sock.peer_seq_num+1);
-      header.th_sum = 0;
-      packet.writeData(34, &header, sizeof(tcphdr));
-      packet.readData(34, tcp_segment, sizeof(tcphdr));
-      header.th_sum = (~ntohs(NetworkUtil::tcp_sum(sock.ip, sock.peerip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
-      packet.writeData(34, &header, sizeof(tcphdr));
-      packet.writeData(54, (uint8_t *)buf + i*512, write_size);
-      sendPacket("IPv4", std::move(packet));
-      remaining -= write_size;
-    }
-    this->returnSystemCall(syscallUUID, count);
+    this->returnSystemCall(syscallUUID, write_size);
   }
   else{
-    printf("\n\nohno\n\n\n");
-    memcpy(sock.send_buffer + sock.nextseqnum-sock.send_base, buf, count);
-    sock.data_num += packet_num; //올림
-    this->returnSystemCall(syscallUUID, count);
+    sock_table[{pid, sockfd}].write_requests.emplace_back(syscallUUID, buf, count);  
   }
 }
 
@@ -472,7 +479,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         pid = key.first;
         sockfd = key.second;
         if(syn && !ack && !Socket->connected){
-          printf("\nsynack executed\n\n");
           auto it = SYNACK_queue.find({srcip, header.th_sport});
           if (it == SYNACK_queue.end()) {
             return;
@@ -490,79 +496,95 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     return;
   }
 
-  if(ack){
-    //printf("seq : %u, ack : %u, rwnd : %d\n", ntohl(header.th_seq), ntohl(header.th_ack), (header.th_win));
-  }
+  if (Socket->connected){
+    if(packet.getSize()>100){ //data packet
 
-  if(ack && ntohl(header.th_ack)==Socket->send_base+1){
-    Socket->send_base++;
-  }
+      //printf("big too : %d ", packet.getSize());
+      
+      if(fin)
+      printf("fin\n\n");
+      
+      if(Socket->read_requests.empty()){
+        //std::cout << "packet first" << std::endl;
+        Socket->read_queue.emplace_back(packet.clone());
+        return;
+      }
 
-  if (Socket->connected && packet.getSize()>100){ //data packet
+      //printf("packet last\n");
+      
+      auto [syscallUUID, buf, count] = Socket->read_requests.front();
 
-    //printf("\n\n%d \n\n\n", packet.getSize());
+      Socket->read_requests.pop_front();
+
+
+      //count < 512이면 read_requests에 개수만큼 있는지 확인하고 없으면 read에 보내기. 있으면 하나하나 꺼내서 쓰기.
+
+      if(count < packet.getSize()-54){
+        packet.readData(54, buf, count);
+        Socket->nextseqnum+=count;
+        Socket->recv_len = packet.getSize()-54-count;
+        packet.readData(54+count, Socket->recv_buffer, Socket->recv_len);
+        this->returnSystemCall(syscallUUID, count);
+        return;
+      }
+
+      packet.readData(54, buf, ((count<512) ? count : 512));
+
+      //printf("buf : %x, count : %d\n", buf, count);
+
+      //printf("%u\n", ntohl(header.th_seq));
+
+      uint32_t srcip, destip;
+
+      packet.readData(26, &srcip, 4);
+      packet.readData(30, &destip, 4);
+
+      Packet reply(54);
+      
+      uint8_t tcp_segment[sizeof(tcphdr)];
+
+      ipv4_t dest_ip;
+      packet.readData(26, &dest_ip, 4);
+      int port = getRoutingTable(dest_ip);
+      std::optional<ipv4_t> src_IP = getIPAddr(port);
+      ipv4_t src_ip = src_IP.value();
+      reply.writeData(26, &src_ip, 4);
+      reply.writeData(30, &dest_ip, 4);
+
+      std::swap(header.th_sport, header.th_dport);
+      header.th_ack = htonl(ntohl(header.th_seq)+((count<512) ? count : 512));
+      header.th_seq = htonl(0);
+      header.th_flags = TH_ACK;
+      header.th_win = 200;
+      header.th_off = 5;
+
+      header.th_sum = 0;
+      reply.writeData(34, &header, sizeof(tcphdr));
+      reply.readData(34, tcp_segment, sizeof(tcphdr));
+
+      header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
+
+      reply.writeData(34, &header, sizeof(tcphdr));
+
+      sendPacket(fromModule, std::move(reply));
+
+      Socket->peer_seq_num++;
     
+      this->returnSystemCall(syscallUUID, (count<512) ? count : 512);
 
-    if(fin)
-    printf("fin\n\n");
-    
-    if(sock_table[{pid, sockfd}].read_requests.empty()){
-      //std::cout << "packet first" << std::endl;
-      sock_table[{pid, sockfd}].read_queue.emplace_back(packet.clone());
       return;
     }
-
-    //printf("packet last\n");
+    else if(ack){
+      printf("%d %d ", packet.getSize(), htonl(header.th_ack));
+      if (sock_table[{pid, sockfd}].write_requests.empty()){
+        return;
+      }
     
-    auto [syscallUUID, buf, count] = sock_table[{pid, sockfd}].read_requests.front();
+      auto [syscallUUID, buf, count] = sock_table[{pid, sockfd}].write_requests.front();
+      sock_table[{pid, sockfd}].write_requests.pop_front();
 
-    sock_table[{pid, sockfd}].read_requests.pop_front();
-
-    packet.readData(54, buf, ((count<512) ? count : 512));
-
-    //printf("buf : %x, count : %d\n", buf, count);
-
-    //printf("%u\n", ntohl(header.th_seq));
-
-    uint32_t srcip, destip;
-
-    packet.readData(26, &srcip, 4);
-    packet.readData(30, &destip, 4);
-
-    Packet reply(54);
-    
-    uint8_t tcp_segment[sizeof(tcphdr)];
-
-    ipv4_t dest_ip;
-    packet.readData(26, &dest_ip, 4);
-    int port = getRoutingTable(dest_ip);
-    std::optional<ipv4_t> src_IP = getIPAddr(port);
-    ipv4_t src_ip = src_IP.value();
-    reply.writeData(26, &src_ip, 4);
-    reply.writeData(30, &dest_ip, 4);
-
-    std::swap(header.th_sport, header.th_dport);
-    header.th_ack = htonl(ntohl(header.th_seq)+((count<512) ? count : 512));
-    header.th_seq = htonl(0);
-    header.th_flags = TH_ACK;
-    header.th_win = 200;
-    header.th_off = 5;
-
-    header.th_sum = 0;
-    reply.writeData(34, &header, sizeof(tcphdr));
-    reply.readData(34, tcp_segment, sizeof(tcphdr));
-
-    header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
-
-    reply.writeData(34, &header, sizeof(tcphdr));
-
-    sendPacket(fromModule, std::move(reply));
-
-    Socket->peer_seq_num++;
-  
-    this->returnSystemCall(syscallUUID, (count<512) ? count : 512);
-
-    return;
+      this->returnSystemCall(syscallUUID, count);
+    }
   }
 
   if (syn && !ack){
@@ -648,10 +670,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (syn && ack) {
 
-    printf("synack\n");
-    printf("seq : %u, ack : %d\n", ntohl(header.th_seq), ntohl(header.th_ack));
-    std::cout << fromModule << std::endl;
-
     Socket->peer_seq_num = ntohl(header.th_seq);
 
     //printf("%d %d\n", header.th_x2, header.th_off);
@@ -688,7 +706,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     //printf("%d.%d.%d.%d %d.%d.%d.%d %d %d is real\n", src_ip[0], src_ip[1], src_ip[2], src_ip[3], dest_ip[0], dest_ip[1], dest_ip[2], dest_ip[3], header.th_sport, header.th_dport);
 
     header.th_ack = htonl(ntohl(header.th_seq) +1);
-    header.th_seq = htonl(Socket->nextseqnum++);
+    header.th_seq = htonl(Socket->nextseqnum);
     header.th_flags = 0x10; //ack
     header.th_win = 200;
 
@@ -704,7 +722,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     Socket->connected = true;
 
-    Socket->rwnd = header.th_win;
+    Socket->rwnd = htons(header.th_win);
 
     this->returnSystemCall(syscallUUID, 0);
 

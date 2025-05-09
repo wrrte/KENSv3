@@ -54,6 +54,7 @@ private:
     std::unordered_map<std::pair<int, int>, std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
     std::list<Packet> read_queue;
     std::list<std::tuple<UUID, void *, size_t>> read_requests;
+    std::list<std::tuple<UUID, void *, size_t>> write_requests;
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
@@ -64,6 +65,8 @@ private:
     uint32_t peer_seq_num;
     uint32_t data_num;
     uint32_t rwnd;
+    uint8_t recv_buffer[1024];
+    size_t recv_len;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
