@@ -42,6 +42,8 @@ private:
   uint64_t TCP_state;
   uint64_t seq;
 
+  bool stop;
+
   struct SocketInfo {
     uint32_t ip;
     uint16_t port;
@@ -57,16 +59,17 @@ private:
     uint16_t peerport;
     bool connected;
     uint8_t send_buffer[SEND_BUFFER_SIZE];
-    int ack_num;
-    int seq_num;
-    int data_num;
-    int rwnd;
+    uint32_t send_base;
+    uint32_t nextseqnum;
+    uint32_t peer_seq_num;
+    uint32_t data_num;
+    uint32_t rwnd;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> SYN_queue;
   std::list<std::tuple<uint32_t, uint32_t, uint16_t, uint16_t>> accept_queue;
-  std::unordered_map<std::pair<uint32_t, uint16_t>, UUID> SYNACK_queue;
+  std::unordered_map<std::pair<uint32_t, uint16_t>,UUID> SYNACK_queue;
   std::unordered_map<std::pair<int, int>, std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
 
   uint16_t allocateEphemeralPort();
