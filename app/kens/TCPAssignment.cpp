@@ -794,10 +794,7 @@ void TCPAssignment::timerCallback(std::any payload) {
         std::get<4>(*it) = timerkey;
       }
     }
-    
   }
-
-
 }
 
 } // namespace E
