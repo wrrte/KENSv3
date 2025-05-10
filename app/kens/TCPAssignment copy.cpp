@@ -14,7 +14,10 @@
 #include <E/E_TimeUtil.hpp>
 #include <cerrno>
 
+
+
 namespace E {
+
 
 TCPAssignment::TCPAssignment(Host &host)
     : HostModule("TCP", host), RoutingInfoInterface(host),
@@ -383,8 +386,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
 
   packet.writeData(34, &header, sizeof(tcphdr));
-  
-  Packet packet2 = packet.clone();
+  packet.readData(34, tcp_segment, sizeof(tcphdr));
 
   sock_table[{pid, sockfd}].peerip = destip;
   sock_table[{pid, sockfd}].peerport = header.th_dport;
@@ -395,9 +397,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   Time time = TCPAssignment::getCurrentTime();
 
-  std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(&Socket, true, srcip, header.th_sport,  destip, header.th_dport, packet2);
-
-  UUID timerkey = addTimer(payload, time + TimeUtil::makeTime(100, TimeUtil::MSEC));
+  UUID timerkey = addTimer(std::make_tuple(&Socket, true, srcip, header.th_sport, destip, header.th_dport, packet.clone()), TimeUtil::makeTime(100, TimeUtil::MSEC));
 
   SYNACK_queue[{destip, header.th_dport}] = {syscallUUID, timerkey};
 
@@ -597,8 +597,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     if(Socket->left_connect_place <= 0){
       return;
     }
-  
-    //Socket->syn_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
     Socket->left_connect_place--;
 
     Packet reply = packet.clone();
@@ -635,12 +633,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     sendPacket(fromModule, std::move(reply));
 
     Time time = TCPAssignment::getCurrentTime();
-
-    std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(Socket, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
   
-    UUID timerkey = addTimer(payload, TimeUtil::makeTime(100, TimeUtil::MSEC));
+    UUID timerkey = addTimer(std::make_tuple(Socket, false, srcip, header.th_sport, destip, header.th_dport, packet.clone()), TimeUtil::makeTime(100, TimeUtil::MSEC));
   
-    Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
+    auto key = std::make_tuple(srcip, destip, header.th_sport, header.th_dport);
+    Socket->syn_queue[key] = timerkey;    
 
     Socket->peer_seq_num = ntohl(header.th_seq);
 
@@ -648,49 +645,46 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   }
 
   if (ack && !syn){
-    for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
-      if (std::get<0>(*it) == srcip &&
-      std::get<1>(*it) == destip &&
-      std::get<2>(*it) == header.th_sport &&
-      std::get<3>(*it) == header.th_dport) {
+    
+    auto key = std::make_tuple(srcip, destip, header.th_sport, header.th_dport);
+    auto it = Socket->syn_queue.find(key);
+    if (it != Socket->syn_queue.end()) {
+      cancelTimer(it->second);
+      
+      Socket->syn_queue.erase(it);
+      Socket->left_connect_place++;
 
-        cancelTimer(std::get<4>(*it));
-
-        Socket->syn_queue.erase(it);
-        Socket->left_connect_place++;
-
-        if (Socket->accept_requests.empty()){
-          Socket->accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
-          return;
-        }
-        auto [syscallUUID, addr, addrlen] = Socket->accept_requests[{pid, sockfd}];
-        Socket->accept_requests.erase({pid, sockfd});
-      
-        struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
-        client_addr->sin_family = AF_INET;
-        client_addr->sin_addr.s_addr = destip;
-        client_addr->sin_port = header.th_dport;
-      
-        // 새로운 소켓 파일 디스크립터 할당
-        int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
-        if (new_sockfd < 0) {
-            this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
-            return;
-        }
-      
-        sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
-        sock_table[{pid, new_sockfd}].peerip = srcip;
-        sock_table[{pid, new_sockfd}].peerport = header.th_sport;
-        sock_table[{pid, new_sockfd}].connected = true;
-        sock_table[{pid, new_sockfd}].rwnd = htons(header.th_win);
-        sock_table[{pid, new_sockfd}].nextseqnum = htonl(header.th_ack);
-        sock_table[{pid, new_sockfd}].send_base = htonl(header.th_ack);
-        sock_table[{pid, new_sockfd}].peer_seq_num = Socket->peer_seq_num;
-      
-        this->returnSystemCall(syscallUUID, new_sockfd);
+      if (Socket->accept_requests.empty()){
+        Socket->accept_queue.emplace_back(srcip, destip, header.th_sport, header.th_dport);
         return;
       }
+      auto [syscallUUID, addr, addrlen] = Socket->accept_requests[{pid, sockfd}];
+      Socket->accept_requests.erase({pid, sockfd});
+    
+      struct sockaddr_in *client_addr = reinterpret_cast<struct sockaddr_in *>(addr);
+      client_addr->sin_family = AF_INET;
+      client_addr->sin_addr.s_addr = destip;
+      client_addr->sin_port = header.th_dport;
+    
+      // 새로운 소켓 파일 디스크립터 할당
+      int new_sockfd = this->createFileDescriptor(pid);  // 새로운 소켓을 할당하는 함수
+      if (new_sockfd < 0) {
+          this->returnSystemCall(syscallUUID, -ENOMEM); // 새 소켓 할당 실패
+          return;
+      }
+    
+      sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
+      sock_table[{pid, new_sockfd}].peerip = srcip;
+      sock_table[{pid, new_sockfd}].peerport = header.th_sport;
+      sock_table[{pid, new_sockfd}].connected = true;
+      sock_table[{pid, new_sockfd}].rwnd = htons(header.th_win);
+      sock_table[{pid, new_sockfd}].nextseqnum = htonl(header.th_ack);
+      sock_table[{pid, new_sockfd}].send_base = htonl(header.th_ack);
+      sock_table[{pid, new_sockfd}].peer_seq_num = Socket->peer_seq_num;
+    
+      this->returnSystemCall(syscallUUID, new_sockfd);
     }
+
     return;
   }
 
@@ -759,32 +753,22 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 }
 
 void TCPAssignment::timerCallback(std::any payload) {
-
-  return; //꼭 빼야해@!!!!!
   
-  auto [Socket, connect, srcip, srcport, destip, destport, packet] = std::any_cast<std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet>>(payload);
+  auto [Socket, connect, srcip, srcport, destip, dest_port, packet] = std::any_cast<std::tuple<SocketInfo*, bool, uint32_t, uint16_t, uint32_t, uint16_t, Packet>>(payload);
 
   sendPacket("IPv4", std::move(packet));
   
   Time time = TCPAssignment::getCurrentTime();
 
-  UUID timerkey = addTimer(std::make_tuple(Socket, connect, srcip, srcport, destip, destport, packet), time +TimeUtil::makeTime(100, TimeUtil::MSEC));
+  UUID timerkey = addTimer(std::make_tuple(Socket, connect, srcip, srcport, destip, dest_port, packet.clone()), TimeUtil::makeTime(100, TimeUtil::MSEC));
 
   if(connect){
-    SYNACK_queue[{destip, destport}].second = timerkey;
+    SYNACK_queue[{destip, dest_port}].second = timerkey;
   }
   else{
-    for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
-      if (std::get<0>(*it) == srcip &&
-      std::get<1>(*it) == destip &&
-      std::get<2>(*it) == srcport &&
-      std::get<3>(*it) == destport) {
-        std::get<4>(*it) = timerkey;
-      }
-    }
+    auto key = std::make_tuple(srcip, destip, srcport, dest_port);
+    Socket->syn_queue[key] = timerkey;  
   }
-
-
 }
 
 } // namespace E
