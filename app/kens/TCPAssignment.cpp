@@ -560,38 +560,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       packet.readData(26, &srcip, 4);
       packet.readData(30, &destip, 4);
 
-      Socket->ip = destip;
+      Socket->ip = destip;  //0을 강제로 배정하긴 하는데 문제가 없으려나?
       Socket->peerip = srcip;
 
-      Packet reply(54);
-      
-      uint8_t tcp_segment[sizeof(tcphdr)];
-
-      ipv4_t dest_ip;
-      reply.writeData(30, &Socket->peerip, 4);
-      reply.readData(30, &dest_ip, 4);
-
-      int port = getRoutingTable(dest_ip);
-      std::optional<ipv4_t> src_IP = getIPAddr(port);
-      ipv4_t src_ip = src_IP.value();
-      reply.writeData(26, &src_ip, 4);
-
-      std::swap(header.th_sport, header.th_dport);
-      header.th_ack = htonl(Socket->readacknum);
-      header.th_seq = htonl(1);
-      header.th_flags = TH_ACK;
-      header.th_win = 200;
-      header.th_off = 5;
-
-      header.th_sum = 0;
-      reply.writeData(34, &header, sizeof(tcphdr));
-      reply.readData(34, tcp_segment, sizeof(tcphdr));
-
-      header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
-
-      reply.writeData(34, &header, sizeof(tcphdr));
-
-      sendPacket(fromModule, std::move(reply));
+      send_ACK(*Socket);
 
       Socket->peer_seq_num++;
     
