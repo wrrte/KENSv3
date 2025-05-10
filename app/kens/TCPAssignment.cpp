@@ -112,7 +112,7 @@ void TCPAssignment::send_ACK(SocketInfo& sock){
   header.th_win = 200;
   header.th_off = 5;
   header.th_flags = TH_ACK;
-  header.th_seq = htonl(1);
+  header.th_seq = htonl(sock.nextseqnum);
   header.th_ack = htonl(sock.readacknum);
   header.th_sum = 0;
   packet.writeData(34, &header, sizeof(tcphdr));
@@ -138,7 +138,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *bu
 
   memcpy(buf, sock.recv_buffer, write_len);
 
-  memmove(sock.recv_buffer, sock.recv_buffer + count, write_len);
+  memmove(sock.recv_buffer, sock.recv_buffer + write_len, sock.recv_len-write_len);
 
   sock.recv_len -= write_len;
 
