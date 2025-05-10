@@ -126,6 +126,7 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *bu
 
   //printf("read\n");
 
+  
   SocketInfo& sock = sock_table[{pid, sockfd}];
 
   if (sock.recv_len==0){
@@ -133,24 +134,22 @@ void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void *bu
     return;
   }
 
-  //std::cout << sock.recv_len << std::endl;
+  int write_len = (sock.recv_len < count) ? sock.recv_len : count;
 
-  memcpy(buf, sock.recv_buffer, count);
+  memcpy(buf, sock.recv_buffer, write_len);
 
-  memmove(sock.recv_buffer, sock.recv_buffer + count, sock.recv_len - count);
+  memmove(sock.recv_buffer, sock.recv_buffer + count, write_len);
 
-  sock.recv_len -= count;
+  sock.recv_len -= write_len;
 
-  sock.readacknum+=count;
+  sock.readacknum+=write_len;
 
   send_ACK(sock);
 
-  this->returnSystemCall(syscallUUID, count);
+  this->returnSystemCall(syscallUUID, write_len);
 }
 
 void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *buf, size_t count){
-
-  printf("%d ", sockfd);
 
   SocketInfo& sock = sock_table[{pid, sockfd}];
 
@@ -362,7 +361,6 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
     sock_table[{pid, sockfd}] = {srcip, header.th_sport};
   }
   else{
-    printf("\n\nexist\n\n\n");
     header.th_sport = sock_table[{pid, sockfd}].port;
   }
 
@@ -519,12 +517,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   }
 
   if (Socket->connected){
-    if(packet.getSize()>100){ //data packet
+    if(packet.getSize()>54){ //data packet
 
       //printf("%d ", header.th_dport);
       
       if(fin)
       printf("fin\n\n");
+
       
       if(Socket->read_requests.empty()){
         //std::cout << "packet first" << std::endl;
@@ -539,6 +538,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       Socket->read_requests.pop_front();
 
       //count < 512이면 read_requests에 개수만큼 있는지 확인하고 없으면 read에 보내기. 있으면 하나하나 꺼내서 쓰기.
+
 
       if(count < packet.getSize()-54){
         packet.readData(54, buf, count);
