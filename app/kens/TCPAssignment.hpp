@@ -67,6 +67,7 @@ private:
     uint32_t rwnd;
     uint8_t recv_buffer[1024];
     size_t recv_len;
+    uint32_t readacknum;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
@@ -87,6 +88,8 @@ protected:
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
 
+  void send_ACK(SocketInfo& sock);
+                              
   void syscall_read(UUID syscallUUID, int pid, int fd, void *buf, size_t count);
   void syscall_write(UUID syscallUUID, int pid, int fd, void *buf, size_t count);
                             
