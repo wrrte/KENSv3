@@ -195,7 +195,8 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *b
     this->returnSystemCall(syscallUUID, write_size);
   }
   else{
-    printf("\n%d %d %d\n\n", sock.nextseqnum, sock.send_base, sock.rwnd);
+    //printf("\n%d %d %d\n\n", sock.nextseqnum, sock.send_base, sock.rwnd);
+
     sock_table[{pid, sockfd}].write_requests.emplace_back(syscallUUID, buf, count);  
   }
 }
@@ -395,7 +396,7 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
 
   Time time = TCPAssignment::getCurrentTime();
 
-  std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(&Socket, true, srcip, header.th_sport,  destip, header.th_dport, packet2);
+  std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, true, srcip, header.th_sport,  destip, header.th_dport, packet2);
 
   UUID timerkey = addTimer(payload, time + TimeUtil::makeTime(100, TimeUtil::MSEC));
 
@@ -476,7 +477,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   SocketInfo* Socket = nullptr;
   int pid, sockfd;
 
-
   if(header.th_flags != TH_SYN){
     for (auto& [key, info] : sock_table) {
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.peerip == srcip && info.peerport == header.th_sport && info.connected == true) {
@@ -509,6 +509,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
           if (it == SYNACK_queue.end()) {
             return;
           }
+          Socket->SimultaneousConnect = true;
           UUID syscallUUID = it->second.first;
           Socket->peerip = srcip;
           Socket->peerport = header.th_sport;
@@ -621,7 +622,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     std::swap(header.th_sport, header.th_dport);
     header.th_ack = htonl(ntohl(header.th_seq) +1);
-    header.th_flags = 0x12; //synack
+    header.th_flags = TH_SYN|TH_ACK; //synack
 
     header.th_sum = 0;
     reply.writeData(34, &header, sizeof(tcphdr));
@@ -636,9 +637,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     Time time = TCPAssignment::getCurrentTime();
 
-    std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(Socket, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
+    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, reply.clone());
   
-    UUID timerkey = addTimer(payload, TimeUtil::makeTime(100, TimeUtil::MSEC));
+    UUID timerkey;
+    if(!Socket->SimultaneousConnect)
+      timerkey = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
+    else
+      timerkey = 0;
   
     Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
 
@@ -654,7 +659,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       std::get<2>(*it) == header.th_sport &&
       std::get<3>(*it) == header.th_dport) {
 
-        cancelTimer(std::get<4>(*it));
+        if(!Socket->SimultaneousConnect)
+          cancelTimer(std::get<4>(*it));
 
         Socket->syn_queue.erase(it);
         Socket->left_connect_place++;
@@ -759,22 +765,28 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 }
 
 void TCPAssignment::timerCallback(std::any payload) {
-
-  return; //꼭 빼야해@!!!!!
   
-  auto [Socket, connect, srcip, srcport, destip, destport, packet] = std::any_cast<std::tuple<SocketInfo*, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet>>(payload);
+  auto [pid, sockfd, connect, srcip, srcport, destip, destport, packet] = std::any_cast<std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet>>(payload);
+
+    
+  tcphdr header;
+  packet.readData(34, &header, sizeof(tcphdr));
 
   sendPacket("IPv4", std::move(packet));
   
   Time time = TCPAssignment::getCurrentTime();
 
-  UUID timerkey = addTimer(std::make_tuple(Socket, connect, srcip, srcport, destip, destport, packet), time +TimeUtil::makeTime(100, TimeUtil::MSEC));
+  UUID timerkey = addTimer(std::make_tuple(pid, sockfd, connect, srcip, srcport, destip, destport, packet), time +TimeUtil::makeTime(100, TimeUtil::MSEC));
 
   if(connect){
     SYNACK_queue[{destip, destport}].second = timerkey;
   }
   else{
-    for (auto it = Socket->syn_queue.begin(); it != Socket->syn_queue.end(); ++it) {
+    auto it = sock_table.find({pid, sockfd});
+    if (it == sock_table.end()) return; // 이미 close되어 사라졌으면 리턴
+    
+    SocketInfo &Socket = it->second;
+    for (auto it = Socket.syn_queue.begin(); it != Socket.syn_queue.end(); ++it) {
       if (std::get<0>(*it) == srcip &&
       std::get<1>(*it) == destip &&
       std::get<2>(*it) == srcport &&
@@ -782,6 +794,7 @@ void TCPAssignment::timerCallback(std::any payload) {
         std::get<4>(*it) = timerkey;
       }
     }
+    
   }
 
 

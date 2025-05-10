@@ -68,6 +68,7 @@ private:
     uint8_t recv_buffer[1024];
     size_t recv_len;
     uint32_t readacknum;
+    bool SimultaneousConnect;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
