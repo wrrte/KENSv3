@@ -334,9 +334,6 @@ uint16_t TCPAssignment::allocateEphemeralPort() {
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) {
 
   // connect syscall 내부에 추가
-  SocketInfo& Socket = sock_table[{pid, sockfd}];
-
-  Socket.rwnd = 200;
 
   struct sockaddr_in *server_addr = reinterpret_cast<struct sockaddr_in *>(addr);
 
@@ -365,15 +362,19 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
     sock_table[{pid, sockfd}] = {srcip, header.th_sport};
   }
   else{
+    printf("\n\nexist\n\n\n");
     header.th_sport = sock_table[{pid, sockfd}].port;
   }
 
   uint8_t tcp_segment[sizeof(tcphdr)];
 
+  SocketInfo& Socket = sock_table[{pid, sockfd}];
+  Socket.rwnd = 51200;
+
   header.th_seq = htonl(Socket.nextseqnum++);
   header.th_ack = 0;
   header.th_flags = TH_SYN; //syn
-  header.th_win = 200;
+  header.th_win = htons(Socket.rwnd);
   header.th_off = 5;
 
   header.th_sum = 0;
@@ -519,6 +520,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (Socket->connected){
     if(packet.getSize()>100){ //data packet
+
+      //printf("%d ", header.th_dport);
       
       if(fin)
       printf("fin\n\n");
