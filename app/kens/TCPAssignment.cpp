@@ -822,6 +822,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         sock_table[{pid, new_sockfd}].nextseqnum = htonl(header.th_ack);
         sock_table[{pid, new_sockfd}].send_base = htonl(header.th_ack);
         sock_table[{pid, new_sockfd}].peer_seq_num = Socket->peer_seq_num;
+        sock_table[{pid, new_sockfd}].readacknum = Socket->readacknum;
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
