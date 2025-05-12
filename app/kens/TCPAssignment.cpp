@@ -499,11 +499,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
 
-  //checksum incorrect면 무시
   uint8_t tcp_segment[5000];
   packet.readData(34, tcp_segment, packet.getSize()-34);
-  if((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF)
-    return;
+  if(((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF)!=0)
+        return;
 
   bool syn = header.th_flags & TH_SYN;  // 0000 0010 → SYN
   bool ack = header.th_flags & TH_ACK;
@@ -511,6 +510,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   SocketInfo* Socket = nullptr;
   int pid, sockfd;
+
+  //std::cout << ((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF) << std::endl;
 
   if(header.th_flags != TH_SYN){
     for (auto& [key, info] : sock_table) {
@@ -628,7 +629,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       //std::cout << Socket->send_base << " " << htonl(header.th_ack) << std::endl;
       for (auto it = Socket->timerkeys.begin(); it != Socket->timerkeys.end(); ) {
-        if (it->first <= htonl(header.th_ack) || (htonl(header.th_ack) < 1024 && it->first > 1<<31)) {
+        if ((it->first < htonl(header.th_ack) && htonl(header.th_ack) - it->first < 1<<30) || (htonl(header.th_ack) < 1024 && it->first > 0xFFFFFFFF-1024)) {
+            //printf("%u %u \n", it->first, htonl(header.th_ack));
             cancelTimer(it->second);
             it = Socket->timerkeys.erase(it); 
         } else {
@@ -636,12 +638,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         }
       }
 
-      if(Socket->send_base < htonl(header.th_ack) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
+      if((Socket->send_base < htonl(header.th_ack) && htonl(header.th_ack) - Socket->send_base < 1<<30) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
         Socket->send_base = htonl(header.th_ack);
       else{
 
         return;
       }
+
+      Socket->rwnd = header.th_win;
 
       if (sock_table[{pid, sockfd}].write_requests.empty()){
         //printf("oh no\n");
