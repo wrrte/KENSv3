@@ -493,7 +493,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if(header.th_flags != TH_SYN){
     for (auto& [key, info] : sock_table) {
-      std::cout << "Socket Info : " << info.ip << " " << info.port << " "  << info.peerip << " "  << info.peerport << " "  << info.connected << std::endl;
+      //std::cout << "Socket Info : " << info.ip << " " << info.port << " "  << info.peerip << " "  << info.peerport << " "  << info.connected << std::endl;
 
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.peerip == srcip && info.peerport == header.th_sport && info.connected == true) {
         pid = key.first;
@@ -504,7 +504,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     }
   }
   if (Socket == nullptr) {
-    printf("2\n");
+    //printf("2\n");
     for (auto& [key, info] : sock_table) {
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport && info.listen_state == true) {
         pid = key.first;
@@ -515,7 +515,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     }
   }
   if (Socket == nullptr) {
-    printf("3\n");
+    //printf("3\n");
     for (auto& [key, info] : sock_table) {
       if ((info.ip == destip || info.ip == 0) && info.port == header.th_dport) {
         Socket = &info;
@@ -540,8 +540,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     return;
   }
 
-  std::cout << "Socket Info : " << Socket->ip << " " << Socket->port << " "  << Socket->peerip << " "  << Socket->peerport << " "  << Socket->connected << std::endl;
-  std::cout << "Packet Info : " << destip << " "  << header.th_dport << " "  << srcip << " "  << header.th_sport << std::endl;
+  //std::cout << "Socket Info : " << Socket->ip << " " << Socket->port << " "  << Socket->peerip << " "  << Socket->peerport << " "  << Socket->connected << std::endl;
+  //std::cout << "Packet Info : " << destip << " "  << header.th_dport << " "  << srcip << " "  << header.th_sport << std::endl;
 
   if (Socket->connected){
     if(packet.getSize()>54){ //data packet
@@ -603,16 +603,23 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     }
     else if(ack){
 
-      printf("ack got\n");
+      //printf("ack got\n");
 
-      if(Socket->send_base < htonl(header.th_ack))
+      //std::cout << Socket->send_base << " " << htonl(header.th_ack) << std::endl;
+
+      if(Socket->send_base < htonl(header.th_ack) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
         Socket->send_base = htonl(header.th_ack);
-      else
+      else{
+
         return;
+      }
 
       if (sock_table[{pid, sockfd}].write_requests.empty()){
+        //printf("oh no\n");
         return; //send_base는 이미 이동했으니 할 건 다 한거지.
       }
+
+      //printf("asdfasdf\n\n");
     
       size_t write_size = Socket->write_requests.front();
       Socket->write_requests.pop_front();
