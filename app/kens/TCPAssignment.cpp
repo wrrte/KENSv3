@@ -502,7 +502,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   uint8_t tcp_segment[5000];
   packet.readData(34, tcp_segment, packet.getSize()-34);
   if(((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF)!=0)
-        return;
+    return;
 
   bool syn = header.th_flags & TH_SYN;  // 0000 0010 → SYN
   bool ack = header.th_flags & TH_ACK;
@@ -580,6 +580,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         return;
       }
 
+      if(htonl(header.th_seq)!=Socket->peer_seq_num){
+        if(htonl(header.th_seq)==Socket->peer_seq_num-(packet.getSize()-54))
+        //  Socket->peer_seq_num -= (packet.getSize()-54);
+          printf("%u\n", htonl(header.th_seq));
+        return;
+      }
+
       //printf("packet last\n");
       
       auto [syscallUUID, buf, count] = Socket->read_requests.front();
@@ -617,7 +624,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       send_ACK(*Socket);
 
-      Socket->peer_seq_num++;
+      Socket->peer_seq_num+=packet.getSize()-54;
     
       this->returnSystemCall(syscallUUID, (packet.getSize()-54<512) ? packet.getSize()-54 : 512);
 
@@ -767,7 +774,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
     Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
 
-    Socket->peer_seq_num = ntohl(header.th_seq);
+    Socket->peer_seq_num = ntohl(header.th_seq)+1;
 
     return;
   }
@@ -822,7 +829,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (syn && ack) {
 
-    Socket->peer_seq_num = ntohl(header.th_seq);
+    Socket->peer_seq_num = ntohl(header.th_seq)+1;
+
+    printf("%u\n\n", Socket->peer_seq_num);
 
     //printf("%d %d\n", header.th_x2, header.th_off);
     
