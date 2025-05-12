@@ -164,7 +164,7 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *b
   if(sock.nextseqnum-sock.send_base+write_size < sock.rwnd){
     ipv4_t dest_ip;
 
-    uint8_t tcp_segment[sizeof(tcphdr) + write_size];
+    uint8_t tcp_segment[5000];
 
     tcphdr header;
     header.th_dport = sock.peerport;
@@ -203,8 +203,16 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *b
 
     sendPacket("IPv4", std::move(packet));
 
-    sock.nextseqnum += write_size;
     this->returnSystemCall(syscallUUID, write_size);
+
+    Time time = TCPAssignment::getCurrentTime();
+
+    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
+  
+    sock.timerkeys[sock.nextseqnum] = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
+
+    sock.nextseqnum += write_size;
+
   }
   else{
     sock.write_requests.emplace_back(write_size);  
@@ -491,6 +499,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(26, &srcip, 4);
   packet.readData(30, &destip, 4);
 
+  //checksum incorrect면 무시
+  uint8_t tcp_segment[5000];
+  packet.readData(34, tcp_segment, packet.getSize()-34);
+  if((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF)
+    return;
+
   bool syn = header.th_flags & TH_SYN;  // 0000 0010 → SYN
   bool ack = header.th_flags & TH_ACK;
   bool fin = header.th_flags & TH_FIN;
@@ -613,6 +627,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       //printf("ack got\n");
 
       //std::cout << Socket->send_base << " " << htonl(header.th_ack) << std::endl;
+      for (auto it = Socket->timerkeys.begin(); it != Socket->timerkeys.end(); ) {
+        if (it->first <= htonl(header.th_ack) || (htonl(header.th_ack) < 1024 && it->first > 1<<31)) {
+            cancelTimer(it->second);
+            it = Socket->timerkeys.erase(it); 
+        } else {
+            ++it;
+        }
+      }
 
       if(Socket->send_base < htonl(header.th_ack) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
         Socket->send_base = htonl(header.th_ack);
@@ -632,8 +654,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       Socket->write_requests.pop_front();
 
       ipv4_t dest_ip;
-
-      uint8_t tcp_segment[sizeof(tcphdr) + write_size];
   
       tcphdr header;
       header.th_dport = Socket->peerport;
@@ -671,6 +691,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       packet.writeData(34, &header, sizeof(tcphdr));
   
       sendPacket("IPv4", std::move(packet));
+
+      Time time = TCPAssignment::getCurrentTime();
+
+      std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
+    
+      Socket->timerkeys[Socket->nextseqnum] = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
   
       Socket->nextseqnum += write_size;
 
@@ -695,8 +721,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     Socket->left_connect_place--;
 
     Packet reply = packet.clone();
-    
-    uint8_t tcp_segment[sizeof(tcphdr)];
 
     ipv4_t dest_ip;
     packet.readData(26, &dest_ip, 4);
@@ -813,8 +837,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     packet.readData(30, &destip, 4);
 
     Packet reply = packet.clone();
-    
-    uint8_t tcp_segment[sizeof(tcphdr)];
 
     ipv4_t dest_ip;
     packet.readData(26, &dest_ip, 4);

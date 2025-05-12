@@ -71,6 +71,7 @@ private:
     uint32_t readacknum;
     bool SimultaneousConnect;
     bool close_signal;
+    std::unordered_map<uint32_t, UUID> timerkeys;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;
