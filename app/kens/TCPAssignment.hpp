@@ -70,6 +70,7 @@ private:
     size_t recv_len;
     uint32_t readacknum;
     bool SimultaneousConnect;
+    bool close_signal;
   };
 
   std::unordered_map<std::pair<int, int>, SocketInfo> sock_table;

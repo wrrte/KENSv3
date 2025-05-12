@@ -469,7 +469,14 @@ void TCPAssignment::syscall_getpeername(UUID syscallUUID, int pid, int sockfd, s
 }
 
 void TCPAssignment::syscall_close(UUID syscallUUID, int pid, int fd) {
-  //sock_table.erase({pid, fd});
+  
+  if(sock_table[{pid, fd}].sb_pointer == 0){
+    sock_table.erase({pid, fd});
+  }
+  else{
+    sock_table[{pid, fd}].close_signal = true;
+  }
+
   this->removeFileDescriptor(pid, fd);
   this->returnSystemCall(syscallUUID, 0);
 }
@@ -652,8 +659,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       header.th_ack = htonl(Socket->peer_seq_num+1);
   
       packet.writeData(54, Socket->send_buffer, write_size);
-
-      memmove(Socket->send_buffer, Socket->send_buffer + write_size, Socket->sb_pointer-write_size);
   
       header.th_sum = 0;
       packet.writeData(34, &header, sizeof(tcphdr));
@@ -668,6 +673,15 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       sendPacket("IPv4", std::move(packet));
   
       Socket->nextseqnum += write_size;
+
+      Socket->sb_pointer -= write_size;
+
+      memmove(Socket->send_buffer, Socket->send_buffer + write_size, Socket->sb_pointer);
+
+      if(Socket->sb_pointer <= 0 && Socket->close_signal){
+        sock_table.erase({pid, sockfd});
+      }
+      return;
     }
   }
 
