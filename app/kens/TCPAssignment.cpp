@@ -1,9 +1,9 @@
 /*
- * E_TCPAssignment.cpp
- *
- *  Created on: 2014. 11. 20.
- *      Author: Keunhong Lee
- */
+* E_TCPAssignment.cpp
+*
+*  Created on: 2014. 11. 20.
+*      Author: Keunhong Lee
+*/
 
 #include "TCPAssignment.hpp"
 #include <E/E_Common.hpp>
@@ -39,10 +39,10 @@ void TCPAssignment::finalize() {}
 bool isNonBlocking(int sockfd){ return false; }
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
-                                   const SystemCallParameter &param) {
+                                  const SystemCallParameter &param) {
 
   //printf("param0 : %d, syscallnum : %d\n", std::get<int>(param.params[0]), param.syscallNumber);
-                                 
+                                
   switch (param.syscallNumber) {
   case SOCKET:
     this->syscall_socket(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -53,8 +53,8 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     break;
   case READ:
     this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
-                       std::get<void *>(param.params[1]),
-                       std::get<int>(param.params[2]));
+                      std::get<void *>(param.params[1]),
+                      std::get<int>(param.params[2]));
     break;
   case WRITE:
     this->syscall_write(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -69,7 +69,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     break;
   case LISTEN:
     this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
-                         std::get<int>(param.params[1]));
+                        std::get<int>(param.params[1]));
     break;
   case ACCEPT:
     this->syscall_accept(
@@ -502,7 +502,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   uint8_t tcp_segment[5000];
   packet.readData(34, tcp_segment, packet.getSize()-34);
   if(((~ntohs(NetworkUtil::tcp_sum(srcip, destip, tcp_segment, packet.getSize()-34)))&0xFFFF)!=0)
-    return;
+        return;
 
   bool syn = header.th_flags & TH_SYN;  // 0000 0010 → SYN
   bool ack = header.th_flags & TH_ACK;
@@ -573,17 +573,19 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       if(fin)
       printf("fin\n\n");
 
+      if(Socket->readacknum != htonl(header.th_seq)){ //비트 오버플로우도 고려
+        //printf("%u %u\n", Socket->readacknum, htonl(header.th_seq));
+        if(Socket->readacknum - htonl(header.th_seq) == 512){
+          send_ACK(*Socket);
+        }
+        return;
+      }
+      //printf("%u %u\n", Socket->readacknum, htonl(header.th_seq));
+
       
       if(Socket->read_requests.empty()){
         //std::cout << "packet first" << std::endl;
         Socket->read_queue.emplace_back(packet.clone());
-        return;
-      }
-
-      if(htonl(header.th_seq)!=Socket->peer_seq_num){
-        if(htonl(header.th_seq)==Socket->peer_seq_num-(packet.getSize()-54))
-        //  Socket->peer_seq_num -= (packet.getSize()-54);
-          printf("%u\n", htonl(header.th_seq));
         return;
       }
 
@@ -624,7 +626,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       send_ACK(*Socket);
 
-      Socket->peer_seq_num+=packet.getSize()-54;
+      Socket->peer_seq_num++;
     
       this->returnSystemCall(syscallUUID, (packet.getSize()-54<512) ? packet.getSize()-54 : 512);
 
@@ -774,7 +776,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
     Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
 
-    Socket->peer_seq_num = ntohl(header.th_seq)+1;
+    Socket->peer_seq_num = ntohl(header.th_seq);
+    Socket->readacknum = ntohl(header.th_seq)+1;
 
     return;
   }
@@ -829,9 +832,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if (syn && ack) {
 
-    Socket->peer_seq_num = ntohl(header.th_seq)+1;
+    Socket->peer_seq_num = ntohl(header.th_seq);
 
-    printf("%u\n\n", Socket->peer_seq_num);
+    Socket->readacknum = ntohl(header.th_seq)+1;
 
     //printf("%d %d\n", header.th_x2, header.th_off);
     
