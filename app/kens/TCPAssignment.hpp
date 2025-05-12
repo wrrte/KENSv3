@@ -28,7 +28,7 @@
 #define FIN_WAIT_2_state 9
 #define TIME_WAIT_state 10
 
-#define SEND_BUFFER_SIZE 4096
+#define SEND_BUFFER_SIZE 131072
 
 namespace E {
 
@@ -54,12 +54,13 @@ private:
     std::unordered_map<std::pair<int, int>, std::tuple<UUID, struct sockaddr *, socklen_t *>> accept_requests;
     std::list<Packet> read_queue;
     std::list<std::tuple<UUID, void *, size_t>> read_requests;
-    std::list<std::tuple<UUID, void *, size_t>> write_requests;
+    std::list<size_t> write_requests;
     int backlog;
     uint32_t peerip;
     uint16_t peerport;
     bool connected;
     uint8_t send_buffer[SEND_BUFFER_SIZE];
+    uint32_t sb_pointer;
     uint32_t send_base;
     uint32_t nextseqnum;
     uint32_t peer_seq_num;
