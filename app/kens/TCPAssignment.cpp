@@ -633,6 +633,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
     else if(ack){
+
       if(syn){
         send_ACK(*Socket);
         return;
@@ -650,15 +651,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
             ++it;
         }
       }
+      Socket->rwnd = htons(header.th_win);
 
       if((Socket->send_base < htonl(header.th_ack) && htonl(header.th_ack) - Socket->send_base < 1<<30) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
         Socket->send_base = htonl(header.th_ack);
       else{
-
+        //std::cout << htons(header.th_win) << std::endl;
         return;
       }
 
-      Socket->rwnd = header.th_win;
+      //std::cout << htons(header.th_win) << std::endl;
 
       if (sock_table[{pid, sockfd}].write_requests.empty()){
         //printf("oh no\n");
@@ -903,7 +905,6 @@ void TCPAssignment::timerCallback(std::any payload) {
   
   auto [pid, sockfd, connect, srcip, srcport, destip, destport, packet] = std::any_cast<std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet>>(payload);
 
-    
   tcphdr header;
   packet.readData(34, &header, sizeof(tcphdr));
 
