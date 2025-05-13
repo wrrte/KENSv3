@@ -633,6 +633,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       return;
     }
     else if(ack){
+      if(syn){
+        send_ACK(*Socket);
+        return;
+      }
 
       //printf("ack got\n");
 
