@@ -575,7 +575,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       if(Socket->readacknum != htonl(header.th_seq)){ //비트 오버플로우도 고려
         //printf("%u %u\n", Socket->readacknum, htonl(header.th_seq));
-        if(Socket->readacknum - htonl(header.th_seq) == 512){
+        if(Socket->readacknum - htonl(header.th_seq) == packet.getSize()-54){
           send_ACK(*Socket);
         }
         return;
@@ -769,10 +769,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, reply.clone());
   
     UUID timerkey;
-    if(!Socket->SimultaneousConnect)
+    //if(!Socket->SimultaneousConnect)
       timerkey = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
-    else
-      timerkey = 0;
+    //else
+    //  timerkey = 0;
   
     Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
 
