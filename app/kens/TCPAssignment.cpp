@@ -919,10 +919,10 @@ void TCPAssignment::timerCallback(std::any payload) {
 
 
   Time newtime = TCPAssignment::getCurrentTime()-TimeUtil::makeTime(100, TimeUtil::MSEC);
-  if(handshake)
+  if(handshake && newtime > 300000000)
   newtime = TCPAssignment::getCurrentTime()/2;
 
-  //if(TCPAssignment::getCurrentTime() < TimeUtil::makeTime(1000, TimeUtil::MSEC))
+  //if(TCPAssignment::getCurrentTime() < TimeUtil::makeTime(2000, TimeUtil::MSEC))
   //std::cout << TCPAssignment::getCurrentTime() << " " << newtime << std::endl;
 
   //Time newtime = time+TimeUtil::makeTime(100, TimeUtil::MSEC);
