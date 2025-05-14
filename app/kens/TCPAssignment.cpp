@@ -774,9 +774,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
     UUID timerkey;
     //if(!Socket->SimultaneousConnect)
-      timerkey = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
+      timerkey = addTimer(payload, TimeUtil::makeTime(100, TimeUtil::MSEC));
     //else
     //  timerkey = 0;
+
+    //std::cout << TCPAssignment::getCurrentTime() << " " << time << std::endl;
   
     Socket->syn_queue.emplace_back(srcip, destip, header.th_dport, header.th_sport, timerkey); //위에 있을 때와 달리 port 순서 바꿔야함. 이미 바뀌었으니.
 
@@ -894,6 +896,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     this->returnSystemCall(syscallUUID, 0);
 
+
     return;
   }
 
@@ -907,8 +910,13 @@ void TCPAssignment::timerCallback(std::any payload) {
   //packet.readData(34, &header, sizeof(tcphdr));
 
   sendPacket("IPv4", std::move(packet));
-  
+
+
   Time newtime = TCPAssignment::getCurrentTime()-TimeUtil::makeTime(100, TimeUtil::MSEC);
+
+  //if(TCPAssignment::getCurrentTime() < TimeUtil::makeTime(1000, TimeUtil::MSEC))
+  //std::cout << TCPAssignment::getCurrentTime() << " " << newtime << std::endl;
+
   //Time newtime = time+TimeUtil::makeTime(100, TimeUtil::MSEC);
 
   UUID timerkey = addTimer(std::make_tuple(pid, sockfd, connect, srcip, srcport, destip, destport, packet, newtime), newtime);
@@ -933,3 +941,4 @@ void TCPAssignment::timerCallback(std::any payload) {
 }
 
 } // namespace E
+//make -j$(nproc)
