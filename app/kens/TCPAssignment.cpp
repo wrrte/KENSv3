@@ -643,7 +643,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       //std::cout << Socket->send_base << " " << htonl(header.th_ack) << std::endl;
       for (auto it = Socket->timerkeys.begin(); it != Socket->timerkeys.end(); ) {
-        if ((it->first < htonl(header.th_ack) && htonl(header.th_ack) - it->first < 1<<30) || (htonl(header.th_ack) < 1024 && it->first > 0xFFFFFFFF-1024)) {
+        if ((it->first < htonl(header.th_ack) && htonl(header.th_ack) - it->first < 1<<30) || (htonl(header.th_ack) < 1<<20 && it->first > 0xFFFFFFFF-1<<20)) {
             //printf("%u %u \n", it->first, htonl(header.th_ack));
             cancelTimer(it->second);
             it = Socket->timerkeys.erase(it); 
@@ -653,8 +653,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       }
       Socket->rwnd = htons(header.th_win);
 
-      if((Socket->send_base < htonl(header.th_ack) && htonl(header.th_ack) - Socket->send_base < 1<<30) || (Socket->send_base > 0xFFFFFFFF-1024 && htonl(header.th_ack)<= 1024))
+      if((Socket->send_base < htonl(header.th_ack) && htonl(header.th_ack) - Socket->send_base < 1<<30) || (Socket->send_base > 0xFFFFFFFF-1<<20 && htonl(header.th_ack)<= 1<<20)){
+        //printf("ack : %u\n", htonl(header.th_ack));
         Socket->send_base = htonl(header.th_ack);
+      }
       else{
         //std::cout << htons(header.th_win) << std::endl;
         return;
@@ -823,12 +825,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
         sock_table[{pid, new_sockfd}] = {destip, header.th_dport, false, 0, {}};
         sock_table[{pid, new_sockfd}].peerip = srcip;
         sock_table[{pid, new_sockfd}].peerport = header.th_sport;
-        sock_table[{pid, new_sockfd}].connected = true;
-        sock_table[{pid, new_sockfd}].rwnd = htons(header.th_win);
+        sock_table[{pid, new_sockfd}].connected = true; //
+        sock_table[{pid, new_sockfd}].rwnd = htons(header.th_win); //
         sock_table[{pid, new_sockfd}].nextseqnum = htonl(header.th_ack);
         sock_table[{pid, new_sockfd}].send_base = htonl(header.th_ack);
-        sock_table[{pid, new_sockfd}].peer_seq_num = Socket->peer_seq_num;
-        sock_table[{pid, new_sockfd}].readacknum = Socket->readacknum;
+        sock_table[{pid, new_sockfd}].peer_seq_num = Socket->peer_seq_num; //
+        sock_table[{pid, new_sockfd}].readacknum = Socket->readacknum; //
       
         this->returnSystemCall(syscallUUID, new_sockfd);
         return;
