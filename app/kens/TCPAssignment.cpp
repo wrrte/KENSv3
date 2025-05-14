@@ -207,7 +207,7 @@ void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void *b
 
     Time time = TCPAssignment::getCurrentTime();
 
-    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
+    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone(), time);
   
     sock.timerkeys[sock.nextseqnum] = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
 
@@ -406,19 +406,15 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, struc
   header.th_sum = (~ntohs(NetworkUtil::tcp_sum(destip, srcip, tcp_segment, sizeof(tcphdr))))&0xFFFF;
 
   packet.writeData(34, &header, sizeof(tcphdr));
-  
-  Packet packet2 = packet.clone();
 
   sock_table[{pid, sockfd}].peerip = destip;
   sock_table[{pid, sockfd}].peerport = header.th_dport;
 
   sendPacket("IPv4", std::move(packet));
   //printf("sent syn\n");
-
-
   Time time = TCPAssignment::getCurrentTime();
 
-  std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, true, srcip, header.th_sport,  destip, header.th_dport, packet2);
+  std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time> payload = std::make_tuple(pid, sockfd, true, srcip, header.th_sport,  destip, header.th_dport, packet, time);
 
   UUID timerkey = addTimer(payload, time + TimeUtil::makeTime(100, TimeUtil::MSEC));
 
@@ -715,7 +711,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
       Time time = TCPAssignment::getCurrentTime();
 
-      std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone());
+      std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, packet.clone(), time);
     
       Socket->timerkeys[Socket->nextseqnum] = addTimer(payload, time+TimeUtil::makeTime(100, TimeUtil::MSEC));
   
@@ -774,7 +770,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     Time time = TCPAssignment::getCurrentTime();
 
-    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, reply.clone());
+    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, reply.clone(), time);
   
     UUID timerkey;
     //if(!Socket->SimultaneousConnect)
@@ -905,16 +901,17 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
 void TCPAssignment::timerCallback(std::any payload) {
   
-  auto [pid, sockfd, connect, srcip, srcport, destip, destport, packet] = std::any_cast<std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet>>(payload);
+  auto [pid, sockfd, connect, srcip, srcport, destip, destport, packet, time] = std::any_cast<std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time>>(payload);
 
-  tcphdr header;
-  packet.readData(34, &header, sizeof(tcphdr));
+  //tcphdr header;
+  //packet.readData(34, &header, sizeof(tcphdr));
 
   sendPacket("IPv4", std::move(packet));
   
-  Time time = TCPAssignment::getCurrentTime();
+  Time newtime = TCPAssignment::getCurrentTime()-TimeUtil::makeTime(100, TimeUtil::MSEC);
+  //Time newtime = time+TimeUtil::makeTime(100, TimeUtil::MSEC);
 
-  UUID timerkey = addTimer(std::make_tuple(pid, sockfd, connect, srcip, srcport, destip, destport, packet), time +TimeUtil::makeTime(100, TimeUtil::MSEC));
+  UUID timerkey = addTimer(std::make_tuple(pid, sockfd, connect, srcip, srcport, destip, destport, packet, newtime), newtime);
 
   if(connect){
     SYNACK_queue[{destip, destport}].second = timerkey;
