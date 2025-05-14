@@ -890,6 +890,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
     sendPacket(fromModule, std::move(reply));
 
+    Time time = TCPAssignment::getCurrentTime();
+
+    std::tuple<int, int, bool, uint32_t, uint32_t, uint16_t, uint16_t, Packet, Time> payload = std::make_tuple(pid, sockfd, false, srcip, destip, header.th_sport, header.th_dport, reply.clone(), time);
+  
+    UUID timerkey = addTimer(payload, TimeUtil::makeTime(100, TimeUtil::MSEC));
+
     Socket->connected = true;
 
     Socket->rwnd = htons(header.th_win);
