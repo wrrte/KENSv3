@@ -66,6 +66,8 @@
         "variant": "cpp",
         "vector": "cpp",
         "algorithm": "cpp",
-        "cerrno": "cpp"
+        "cerrno": "cpp",
+        "chrono": "cpp",
+        "thread": "cpp"
     }
 }
